@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\DonationProcessRequest;
 use App\Models\Donation;
+use App\Models\Country;
+use App\Models\Currency;
+use App\Models\Purpose;
 use App\Services\EmailService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
 
 class DonationController extends Controller
 {
@@ -15,6 +19,37 @@ class DonationController extends Controller
     public function __construct(EmailService $emailService)
     {
         $this->emailService = $emailService;
+    }
+
+    /**
+     * Display the donation form home page
+     */
+    public function index()
+    {
+        // Fetch dynamic data from database
+        $countries = Country::active()
+            ->orderBy('name')
+            ->with(['states:id,country_id,name,code', 'currency:id,code'])
+            ->get(['id', 'name', 'iso2 as code', 'phone_code', 'default_currency', 'flag_icon']);
+        
+        $currencies = Currency::active()
+            ->orderBy('name')
+            ->get(['id', 'name', 'code', 'symbol']);
+        
+        $purposes = Purpose::active()
+            ->orderBy('category')
+            ->orderBy('sort_order')
+            ->get(['id', 'name', 'slug', 'description', 'category', 'icon']);
+
+        // Simple country detection based on locale (can be enhanced with IP geolocation)
+        $detectedCountry = $countries->where('code', 'US')->first();
+
+    return Inertia::render('donation/form', [
+            'countries' => $countries,
+            'currencies' => $currencies,
+            'purposes' => $purposes,
+            'detectedCountry' => $detectedCountry,
+        ]);
     }
 
     /**
@@ -36,7 +71,7 @@ class DonationController extends Controller
                 'phone_country_code' => $validated['phone_country_code'],
                 'address_line_1' => $validated['address_line_1'],
                 'address_line_2' => $validated['address_line_2'] ?? null,
-                'state_id' => $validated['state'] ?? null,
+                'state_id' => $validated['state'],
                 'city' => $validated['city'],
                 'zip_code' => $validated['zip_code'],
                 'country_id' => $validated['country'],

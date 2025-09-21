@@ -34,13 +34,14 @@ class DonationProcessRequest extends FormRequest
             'address_line_2' => 'nullable|string|max:255',
             'city' => 'required|string|max:100',
             'zip_code' => 'required|string|max:20',
-            'state' => 'nullable|exists:states,id',
+            'state' => 'required|exists:states,id',
             
             // Personal information
             'first_name' => 'required|string|min:2|max:100|regex:/^[a-zA-Z\s]+$/',
             'middle_name' => 'nullable|string|max:100|regex:/^[a-zA-Z\s]+$/',
             'last_name' => 'required|string|min:2|max:100|regex:/^[a-zA-Z\s]+$/',
-            'email' => 'required|email:rfc,dns|max:255',
+            // Removed DNS validation to prevent dns_get_record timeouts in local/offline env
+            'email' => 'bail|required|email:rfc|max:255',
             'phone' => 'required|string|min:10|max:20|regex:/^[0-9\-\+\(\)\s]+$/',
             'phone_country_code' => 'required|string|min:1|max:10|regex:/^\+?[0-9]+$/',
             
@@ -104,6 +105,7 @@ class DonationProcessRequest extends FormRequest
             'city.max' => 'City name cannot exceed :max characters.',
             'zip_code.required' => 'ZIP/Postal code is required.',
             'zip_code.max' => 'ZIP/Postal code cannot exceed :max characters.',
+            'state.required' => 'State/Province is required.',
             'state.exists' => 'The selected state is invalid.',
             
             // Personal information messages
@@ -195,21 +197,17 @@ class DonationProcessRequest extends FormRequest
                 $validator->errors()->add('pan_number', 'PAN number is required when claiming tax exemption.');
             }
 
-            // Custom validation: KYC documents required if not skipping KYC
-            if (!$this->input('skip_kyc') && (!$this->has('documents') || empty($this->input('documents')))) {
+            // Custom validation: KYC documents required if not skipping KYC and field entirely absent
+            if (!$this->input('skip_kyc') && !$this->has('documents')) {
                 $validator->errors()->add('documents', 'At least one KYC document is required when KYC is not skipped.');
             }
 
-            // Custom validation: Validate each document has both type and file
+            // Custom validation: Optional extra file integrity check only (avoid duplicating required messages)
             if ($this->has('documents') && is_array($this->input('documents'))) {
-                foreach ($this->input('documents') as $index => $document) {
-                    if (is_array($document)) {
-                        if (empty($document['type'])) {
-                            $validator->errors()->add("documents.{$index}.type", 'Document type is required.');
-                        }
-                        if (empty($document['file'])) {
-                            $validator->errors()->add("documents.{$index}.file", 'Document file is required.');
-                        }
+                foreach (array_keys($this->input('documents')) as $index) {
+                    $uploadedFile = $this->file("documents.$index.file");
+                    if ($uploadedFile instanceof \Illuminate\Http\UploadedFile && !$uploadedFile->isValid()) {
+                        $validator->errors()->add("documents.{$index}.file", 'Uploaded document appears to be invalid or corrupted.');
                     }
                 }
             }
