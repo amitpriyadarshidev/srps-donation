@@ -2,11 +2,43 @@
 
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+use App\Models\Country;
+use App\Models\Currency;
+use App\Models\Purpose;
+use App\Http\Controllers\DonationController;
 
 // Public routes
 Route::get('/', function () {
-    return Inertia::render('welcome');
+    // Fetch dynamic data from database
+    $countries = Country::active()
+        ->orderBy('name')
+        ->with(['states:id,country_id,name,code', 'currency:id,code'])
+        ->get(['id', 'name', 'iso2 as code', 'phone_code', 'default_currency', 'flag_icon']);
+    
+    $currencies = Currency::active()
+        ->orderBy('name')
+        ->get(['id', 'name', 'code', 'symbol']);
+    
+    $purposes = Purpose::active()
+        ->orderBy('category')
+        ->orderBy('sort_order')
+        ->get(['id', 'name', 'slug', 'description', 'category', 'icon']);
+
+    // Simple country detection based on locale (can be enhanced with IP geolocation)
+    $detectedCountry = $countries->where('code', 'US')->first();
+
+    return Inertia::render('welcome', [
+        'countries' => $countries,
+        'currencies' => $currencies,
+        'purposes' => $purposes,
+        'detectedCountry' => $detectedCountry,
+    ]);
 })->name('home');
+
+// Donation routes
+Route::post('/donation/process', [DonationController::class, 'process'])->name('donation.process');
+Route::get('/donation/{donation}/payment', [DonationController::class, 'paymentSelection'])->name('donation.payment-selection');
+Route::get('/donation/{donation}/confirmation', [DonationController::class, 'confirmation'])->name('donation.confirmation');
 
 // Protected routes
 Route::middleware(['auth', 'verified'])->group(function () {
