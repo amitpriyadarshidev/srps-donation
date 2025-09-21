@@ -10,7 +10,7 @@ A comprehensive donation management platform built with Laravel and React (Inert
 - **Support** - Customer service and help desk
 
 ### 📊 Reports
-- **Payment History** - Track all payment transactions
+- **Payment History** - Track all successful payments
 - **Refund History** - Monitor refund requests and processing
 - **Settlement History** - Settlement tracking and reporting
 
