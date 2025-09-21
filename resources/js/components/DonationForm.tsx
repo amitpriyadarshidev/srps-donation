@@ -616,7 +616,11 @@ const DonationForm: React.FC<DonationFormProps> = ({
                     <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
                       Phone Number <span className="text-red-500">*</span>
                     </label>
-                    <div className="flex">
+                    <div className={`flex rounded-md ${
+                      errors.phone || errors.phone_country_code || errors.phone_combined 
+                        ? 'ring-1 ring-red-300' 
+                        : ''
+                    }`}>
                       <div className="relative" style={{ 
                         minWidth: 'fit-content',
                         width: `${calculateCodeWidth(formData.phone_country_code)}px`
@@ -628,9 +632,7 @@ const DonationForm: React.FC<DonationFormProps> = ({
                           placeholder="Code"
                           searchPlaceholder="Search country codes..."
                           emptyText="No country found."
-                          className={`w-full rounded-r-none border-r-0 focus:border-r focus:z-10 ${
-                            errors.phone_country_code || errors.phone_combined ? 'border-red-500' : ''
-                          }`}
+                          className="w-full rounded-r-none border-r-0 focus:border-r focus:z-10"
                         />
                       </div>
                       <Input
@@ -639,9 +641,7 @@ const DonationForm: React.FC<DonationFormProps> = ({
                         value={formData.phone}
                         onChange={(e) => handleInputChange('phone', e.target.value)}
                         placeholder="Your Mobile Number"
-                        className={`flex-1 rounded-l-none -ml-px focus:z-10 ${
-                          errors.phone || errors.phone_combined ? 'border-red-500' : ''
-                        }`}
+                        className="flex-1 rounded-l-none -ml-px focus:z-10"
                       />
                     </div>
                     {(errors.phone || errors.phone_country_code || errors.phone_combined) && (
@@ -721,11 +721,7 @@ const DonationForm: React.FC<DonationFormProps> = ({
                   
                   <div className="space-y-4">
                     {formData.documents.map((document, index) => (
-                      <div key={index} className={`p-4 border rounded-lg ${
-                        errors[`documents.${index}.type`] || errors[`documents.${index}.file`] 
-                          ? 'border-red-300' 
-                          : 'border-gray-200'
-                      }`}>
+                      <div key={index} className="p-4 border border-gray-200 rounded-lg">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
