@@ -190,9 +190,8 @@ class DonationController extends Controller
         $donation = Donation::with(['country', 'currency', 'purpose'])
             ->findOrFail($donationId);
 
-        $gateways = PaymentGateway::active()
-            ->orderBy('display_order')
-            ->get(['id', 'name', 'code', 'logo', 'description', 'is_default']);
+        $gateways = PaymentGateway::orderBy('display_order')
+            ->get(['id', 'name', 'code', 'logo', 'description', 'is_default', 'is_active']);
 
         return inertia('donation/payment-selection', [
             'donation' => $donation,
@@ -211,5 +210,49 @@ class DonationController extends Controller
         return inertia('donation/confirmation', [
             'donation' => $donation
         ]);
+    }
+
+    /**
+     * Begin payment with selected gateway
+     */
+    public function beginPayment(Request $request, $donationId)
+    {
+        $request->validate([
+            'gateway' => 'required|string|exists:payment_gateways,code',
+        ]);
+
+        $donation = Donation::with(['currency', 'purpose'])->findOrFail($donationId);
+        $gateway = \App\Models\PaymentGateway::where('code', $request->input('gateway'))->firstOrFail();
+
+        // For now, implement Worldline minimal init only
+        if ($gateway->code === 'worldline') {
+            // Determine environment: default to test
+            $env = config('app.env') === 'production' ? 'live' : 'test';
+            $configs = $gateway->configs()->where('environment', $env)->pluck('value', 'key');
+
+            // Minimal payload; in real flow, generate transaction/order and checksum
+            $payload = [
+                'merchantCode' => $configs->get('merchantCode', ''),
+                'merchantSchemeCode' => $configs->get('merchantSchemeCode', ''),
+                'amount' => number_format((float) $donation->amount * 1.05, 2, '.', ''), // include 5% fee
+                'currency' => $donation->currency->code ?? 'INR',
+                'donationId' => (string) $donation->id,
+                'purpose' => $donation->purpose->name ?? 'Donation',
+                'returnUrl' => route('donation.confirmation', $donation->id),
+                'environment' => $env,
+            ];
+
+            // Respond with JSON for front-end to handle redirection/loading Worldline widget
+            return response()->json([
+                'ok' => true,
+                'gateway' => 'worldline',
+                'payload' => $payload,
+            ]);
+        }
+
+        return response()->json([
+            'ok' => false,
+            'message' => 'Gateway not implemented yet.',
+        ], 422);
     }
 }

@@ -11,6 +11,7 @@ Route::get('/', [DonationController::class, 'index'])->name('home');
 Route::post('/donation/process', [DonationController::class, 'process'])->name('donation.process');
 Route::get('/donation/{donation}/payment', [DonationController::class, 'paymentSelection'])->name('donation.payment-selection');
 Route::get('/donation/{donation}/confirmation', [DonationController::class, 'confirmation'])->name('donation.confirmation');
+Route::post('/donation/{donation}/pay', [DonationController::class, 'beginPayment'])->name('donation.pay');
 
 // Protected routes
 Route::middleware(['auth', 'verified'])->group(function () {
