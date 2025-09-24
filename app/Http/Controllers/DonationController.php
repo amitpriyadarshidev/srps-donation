@@ -280,7 +280,7 @@ class DonationController extends Controller
                 'status' => $recent->status,
                 'amount' => (string)$recent->amount,
                 'currency' => $donation->currency->symbol ?? '',
-                'gateway' => optional($recent->gateway)->code ?? 'worldline',
+                'gateway' => optional($recent->gateway)->code,
                 'started_at' => optional($recent->created_at)->toIso8601String(),
             ];
         }
@@ -316,15 +316,22 @@ class DonationController extends Controller
 
         $donation = Donation::with(['currency', 'purpose'])->findOrFail($donationId);
         $gateway = \App\Models\PaymentGateway::where('code', $request->input('gateway'))->firstOrFail();
+        $env = config('app.env') === 'production' ? 'live' : 'test';
 
-        // Worldline: build signed payload and config
-        if ($gateway->code === 'worldline') {
-            $env = config('app.env') === 'production' ? 'live' : 'test';
+        // Resolve gateway service dynamically
+        $factory = new \App\Services\Payment\GatewayFactory();
+        $service = $factory->make($gateway->code, $env);
+        if (!$service) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Selected gateway is not supported yet.',
+            ], 422);
+        }
 
-            // Build a transaction id similar to legacy for traceability
-            $txnId = 'WL-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(6));
+            // Build a transaction reference with gateway-based prefix for traceability
+            $prefix = strtoupper(substr($gateway->code, 0, 3));
+            $txnId = $prefix . '-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(6));
 
-            $service = new \App\Services\PaymentGateways\WorldlineGateway($env);
             $response = $service->initializePayment([
                 'amount' => (float) $donation->amount * 1.05, // include 5% fee
                 'currency' => $donation->currency->code ?? 'INR',
@@ -339,7 +346,7 @@ class DonationController extends Controller
             if (!($response['success'] ?? false)) {
                 return response()->json([
                     'ok' => false,
-                    'message' => 'Failed to initialize Worldline payment',
+                    'message' => 'Failed to initialize payment',
                 ], 422);
             }
 
@@ -363,25 +370,19 @@ class DonationController extends Controller
                 'email' => $donation->email,
                 'phone' => ($donation->phone_country_code ?? '') . ($donation->phone ?? ''),
                 'status' => 'pending',
-                'gateway' => 'worldline',
+                'gateway' => $gateway->code,
             ]);
 
             return response()->json([
                 'ok' => true,
-                'gateway' => 'worldline',
+                'gateway' => $gateway->code,
                 'payload' => [
-                    'form_data' => $response['data'],
-                    'mer_array' => $response['mer_array'],
+                    'form_data' => $response['data'] ?? [],
+                    'mer_array' => $response['mer_array'] ?? [],
                     'environment' => $env,
                     'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
                 ],
             ]);
-        }
-
-        return response()->json([
-            'ok' => false,
-            'message' => 'Gateway not implemented yet.',
-        ], 422);
     }
 
     /**
@@ -452,14 +453,15 @@ class DonationController extends Controller
             return response()->json(['ok' => false, 'message' => 'Transaction not found for this donation.'], 404);
         }
 
-        $gateway = optional($txn->gateway)->code ?? null;
-        if (!$gateway) {
+        $gatewayCode = optional($txn->gateway)->code ?? null;
+        if (!$gatewayCode) {
             return response()->json(['ok' => false, 'message' => 'Gateway not associated with transaction.'], 422);
         }
 
-        // For now handle worldline; extend resolver later if needed
-        if ($gateway === 'worldline') {
-            $service = new \App\Services\PaymentGateways\WorldlineGateway(app()->environment('production') ? 'live' : 'test');
+        // Resolve gateway service dynamically
+        $factory = new \App\Services\Payment\GatewayFactory();
+        $service = $factory->make($gatewayCode, app()->environment('production') ? 'live' : 'test');
+        if ($service) {
             // Prefer the gateway reference we created at init
             $ref = $txn->gateway_transaction_id ?: $txn->gateway_token;
             $verify = $service->verifyPayment((string)$ref, optional($txn->created_at)->format('d-m-Y'));
