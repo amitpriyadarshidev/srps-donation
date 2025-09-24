@@ -9,9 +9,13 @@ Route::get('/', [DonationController::class, 'index'])->name('home');
 
 // Donation routes
 Route::post('/donation/process', [DonationController::class, 'process'])->name('donation.process');
+Route::get('/donation/{donation}/edit', [DonationController::class, 'edit'])->name('donation.edit');
+Route::put('/donation/{donation}', [DonationController::class, 'update'])->name('donation.update');
 Route::get('/donation/{donation}/payment', [DonationController::class, 'paymentSelection'])->name('donation.payment-selection');
 Route::get('/donation/{donation}/confirmation', [DonationController::class, 'confirmation'])->name('donation.confirmation');
 Route::post('/donation/{donation}/pay', [DonationController::class, 'beginPayment'])->name('donation.pay');
+Route::post('/donation/{donation}/status', [DonationController::class, 'checkStatus'])->name('donation.status');
+Route::match(['GET','POST'], '/payment/callback', [DonationController::class, 'paymentCallback'])->name('payment.callback');
 
 // Protected routes
 Route::middleware(['auth', 'verified'])->group(function () {
@@ -42,9 +46,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('withdrawals');
 
     // Reports routes
-    Route::get('/transaction', function () {
+    Route::get('/transactions', function () {
         return Inertia::render('dashboard');
-    })->name('transaction');
+    })->name('transactions');
 
     Route::get('/commissions', function () {
         return Inertia::render('dashboard');
@@ -59,17 +63,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         return Inertia::render('dashboard');
     })->name('settings.general');
 
-    Route::get('/settings/system', function () {
-        return Inertia::render('dashboard');
-    })->name('settings.system');
-
-    Route::get('/settings/platform', function () {
-        return Inertia::render('dashboard');
-    })->name('settings.platform');
-
-    Route::get('/settings/gdpr', function () {
-        return Inertia::render('dashboard');
-    })->name('settings.gdpr');
+    Route::get('/settings/form', function () { return Inertia::render('dashboard'); })->name('settings.form');
+    Route::get('/settings/payment', function () { return Inertia::render('dashboard'); })->name('settings.payment');
+    Route::get('/settings/email', function () { return Inertia::render('dashboard'); })->name('settings.email');
 
     // Frontend routes
     Route::get('/themes', function () {
@@ -93,9 +89,18 @@ Route::middleware(['auth', 'verified'])->group(function () {
         return Inertia::render('dashboard');
     })->name('cache');
 
-    Route::get('/logs', function () {
-        return Inertia::render('dashboard');
-    })->name('logs');
+    Route::get('/logs', function () { return Inertia::render('dashboard'); })->name('logs');
+    Route::get('/payments', function () { return Inertia::render('dashboard'); })->name('payments');
+    Route::get('/refunds', function () { return Inertia::render('dashboard'); })->name('refunds');
+    Route::get('/settlements', function () { return Inertia::render('dashboard'); })->name('settlements');
+    // Master data
+    Route::get('/currencies', function () { return Inertia::render('dashboard'); })->name('currencies');
+    Route::get('/countries', function () { return Inertia::render('dashboard'); })->name('countries');
+    Route::get('/states', function () { return Inertia::render('dashboard'); })->name('states');
+    Route::get('/gateways', function () { return Inertia::render('dashboard'); })->name('gateways');
+    // Admin
+    Route::get('/roles', function () { return Inertia::render('dashboard'); })->name('roles');
+    Route::get('/permissions', function () { return Inertia::render('dashboard'); })->name('permissions');
 
     // Footer route
     Route::get('/support', function () {

@@ -16,10 +16,12 @@ interface DonationFormPageProps extends SharedData {
     purposes: Purpose[];
     detectedCountry?: Country;
     errors?: FormErrors;
+    // New optional prop when editing
+    donation?: any;
 }
 
 export default function DonationFormPage() {
-    const { auth, countries, currencies, purposes, detectedCountry, errors } = usePage<DonationFormPageProps>().props;
+    const { countries, currencies, purposes, detectedCountry, errors, donation } = usePage<DonationFormPageProps>().props;
     // Force light mode while on this page
     useEffect(() => {
         if (typeof document === 'undefined') return;
@@ -42,28 +44,28 @@ export default function DonationFormPage() {
 
     // --- Begin inlined DonationForm logic ---
     const [formData, setFormData] = useState<DonationFormData>({
-        country: detectedCountry?.id || '',
-        purpose: '',
-        currency: detectedCountry?.default_currency || '',
-        amount: '1',
-        address_line_1: '',
-        address_line_2: '',
-        state: '',
-        city: '',
-        zip_code: '',
-        first_name: '',
-        middle_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        phone_country_code: detectedCountry?.phone_code || '',
-        tax_exemption: false,
-        pan_number: '',
+        country: donation?.country_id || detectedCountry?.id || '',
+        purpose: donation?.purpose_id || '',
+        currency: donation?.currency_id || detectedCountry?.default_currency || '',
+        amount: donation ? String(donation.amount) : '1',
+        address_line_1: donation?.address_line_1 || '',
+        address_line_2: donation?.address_line_2 || '',
+        state: donation?.state_id || '',
+        city: donation?.city || '',
+        zip_code: donation?.zip_code || '',
+        first_name: donation?.first_name || '',
+        middle_name: donation?.middle_name || '',
+        last_name: donation?.last_name || '',
+        email: donation?.email || '',
+        phone: donation?.phone || '',
+        phone_country_code: donation?.phone_country_code || detectedCountry?.phone_code || '',
+        tax_exemption: !!donation?.tax_exemption,
+        pan_number: donation?.pan_number || '',
         documents: [{ type: '', file: null }],
-        skip_kyc: false,
+        skip_kyc: !!donation?.skip_kyc,
         terms_accepted: false,
     });
-    const [states, setStates] = useState<State[]>([]);
+    const [states, setStates] = useState<State[]>(donation?.country?.states || []);
     const [localErrors, setLocalErrors] = useState<FormErrors>(errors || {});
     const [isLoading, setIsLoading] = useState(false);
     const [currencySymbol, setCurrencySymbol] = useState('$');
@@ -80,21 +82,49 @@ export default function DonationFormPage() {
     const phoneCodeOptions: ComboboxOption[] = countries.map(c => ({ value: c.phone_code, label: `${c.flag_icon} ${c.phone_code}` }));
     const loadStates = async (countryId: string, selectedStateId?: string) => { if (!countryId) { setStates([]); return; } try { const resp = await fetch(`/api/states?country_id=${countryId}`); const data = await resp.json(); setStates(data); if (selectedStateId) { setFormData(p => ({ ...p, state: selectedStateId })); } else { setFormData(p => ({ ...p, state: '' })); } } catch { setStates([]); } };
     useEffect(() => { if (formData.currency) { const c = currencies.find(c => c.id === formData.currency); const sym = c?.symbol || '$'; setCurrencySymbol(sym); setSymbolWidth(calculateSymbolWidth(sym)); } }, [formData.currency, currencies]);
-    useEffect(() => { if (detectedCountry && detectedCountry.states) { setStates(detectedCountry.states); } else if (detectedCountry) { loadStates(detectedCountry.id); } }, [detectedCountry]);
+    useEffect(() => { const cid = donation?.country_id || detectedCountry?.id; if (cid && !donation?.country?.states) { loadStates(cid, donation?.state_id); } }, [donation, detectedCountry]);
     const handleInputChange = (name: string, value: any) => { setFormData(p => ({ ...p, [name]: value })); if (localErrors[name]) { setLocalErrors(prev => { const ne = { ...prev }; delete ne[name]; return ne; }); } };
     const handleCountryChange = (id: string) => { handleInputChange('country', id); if (id) { const c = countries.find(c => c.id === id); if (c) { handleInputChange('currency', c.default_currency); const phoneCode = c.phone_code.startsWith('+') ? c.phone_code : `+${c.phone_code}`; handleInputChange('phone_country_code', phoneCode); if (c.states) { setStates(c.states); setFormData(p => ({ ...p, state: '' })); } else { loadStates(id); } } } else { setStates([]); setFormData(p => ({ ...p, state: '' })); } };
     const addDocument = () => setFormData(p => ({ ...p, documents: [...p.documents, { type: '', file: null }] }));
     const removeDocument = (i: number) => { if (formData.documents.length > 1) { setFormData(p => ({ ...p, documents: p.documents.filter((_, idx) => idx !== i) })); } };
     const updateDocument = (index: number, field: 'type' | 'file', value: any) => { setFormData(p => ({ ...p, documents: p.documents.map((d, i) => i === index ? { ...d, [field]: value } : d) })); const key = `documents.${index}.${field}`; if (localErrors[key]) { setLocalErrors(prev => { const ne = { ...prev }; delete ne[key]; if (ne.documents && typeof ne.documents === 'string') delete ne.documents; return ne; }); } };
-    const handleSubmit = async (e: React.FormEvent) => { e.preventDefault(); setIsLoading(true); setLocalErrors({}); try { const fd = new FormData(); Object.entries(formData).forEach(([k, v]) => { if (k === 'documents') { formData.documents.forEach((doc, i) => { fd.append(`documents[${i}][type]`, doc.type); if (doc.file) fd.append(`documents[${i}][file]`, doc.file as File); }); } else if (typeof v === 'boolean') { fd.append(k, v ? '1' : '0'); } else { fd.append(k, v.toString()); } }); router.post('/donation/process', fd, { onSuccess: () => { }, onError: (errs) => { setLocalErrors(errs as FormErrors); setIsLoading(false); } }); } catch { setIsLoading(false); } };
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault(); setIsLoading(true); setLocalErrors({});
+        try {
+            const fd = new FormData();
+            Object.entries(formData).forEach(([k, v]) => {
+                if (k === 'documents') {
+                    formData.documents.forEach((doc, i) => { fd.append(`documents[${i}][type]`, doc.type); if (doc.file) fd.append(`documents[${i}][file]`, doc.file as File); });
+                } else if (typeof v === 'boolean') {
+                    fd.append(k, v ? '1' : '0');
+                } else {
+                    fd.append(k, v.toString());
+                }
+            });
+            if (donation?.id) {
+                fd.append('_method', 'PUT');
+                router.post(`/donation/${donation.id}`, fd, {
+                    onSuccess: () => {},
+                    onError: (errs) => { setLocalErrors(errs as FormErrors); setIsLoading(false); },
+                });
+            } else {
+                router.post('/donation/process', fd, {
+                    onSuccess: () => {},
+                    onError: (errs) => { setLocalErrors(errs as FormErrors); setIsLoading(false); },
+                });
+            }
+        } catch {
+            setIsLoading(false);
+        }
+    };
 
     return (
         <DonationLayout title="Donate">
-            <Head title="Make a Donation" />
+            <Head title={donation?.id ? 'Edit Donation' : 'Make a Donation'} />
             <div className="bg-white rounded-lg shadow-sm border border-black/5 p-8">
                 <div className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-neutral-900 mb-2">Proceed to Pay</h1>
-                    <p className="text-neutral-600">Complete your donation details below</p>
+                    <h1 className="text-3xl font-bold text-neutral-900 mb-2">{donation?.id ? 'Edit Donation' : 'Proceed to Pay'}</h1>
+                    <p className="text-neutral-600">{donation?.id ? 'Update your donation details and continue' : 'Complete your donation details below'}</p>
                 </div>
                 <form onSubmit={handleSubmit} className="space-y-8">
                     <Card>

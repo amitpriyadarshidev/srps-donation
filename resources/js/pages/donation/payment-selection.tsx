@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { usePage, Head, Link, router } from '@inertiajs/react';
+import { usePage, Head, Link } from '@inertiajs/react';
 import { initWorldline } from '@/payment/worldline';
 import DonationLayout from '@/layouts/donation-layout';
 
@@ -42,6 +42,7 @@ const PaymentSelection: React.FC = () => {
   );
   const [logoError, setLogoError] = useState<Record<string, boolean>>({});
   const [processing, setProcessing] = useState(false);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (!donation) return;
@@ -60,16 +61,29 @@ const PaymentSelection: React.FC = () => {
   return (
     <DonationLayout title="Payment">
       <Head title="Payment Selection" />
-  <div className="max-w-5xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+      <div className="max-w-5xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8">
         {flash.success && (
-            <div className="mb-6 rounded-md border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-700/40 px-4 py-3 text-green-800 dark:text-green-300 text-sm font-medium">
-              {flash.success}
-            </div>
+          <div className="mb-6 rounded-md border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-700/40 px-4 py-3 text-green-800 dark:text-green-300 text-sm font-medium">
+            {flash.success}
+          </div>
         )}
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-neutral-100 mb-4">Proceed to Payment</h1>
+        <h1 className="text-3xl font-bold text-blue-800 mb-6 tracking-tight">Proceed to Payment</h1>
         {donation && (
           <div className="mb-8">
-            <h2 className="text-lg font-semibold text-blue-700 mb-3">Donation Summary</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-blue-700">Donation Summary</h2>
+              {donation ? (
+                <Link
+                  href={route('donation.edit', donation.id)}
+                  className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-blue-700 text-xs font-semibold hover:bg-blue-100 hover:border-blue-300 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+                    <path d="M5 19h3l9.293-9.293a1 1 0 0 0 0-1.414L13.707 4.707a1 1 0 0 0-1.414 0L3 14v3a2 2 0 0 0 2 2zm11.707-11.707 1.414 1.414" />
+                  </svg>
+                  Edit Details
+                </Link>
+              ) : null}
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full border border-gray-200 text-sm">
                 <tbody>
@@ -109,9 +123,113 @@ const PaymentSelection: React.FC = () => {
           </div>
         )}
 
+        {/* Last transaction status (from session) */}
+        {props.lastTransaction ? (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M12 22a10 10 0 1 1 10-10 10.011 10.011 0 0 1-10 10zm1-10V7h-2v7h6v-2z"/></svg>
+                <span className="font-semibold">Last Transaction</span>
+              </div>
+              <span className="text-xs font-medium">{new Date(props.lastTransaction.started_at || Date.now()).toLocaleString()}</span>
+            </div>
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
+              <div><span className="text-gray-600">Txn:</span> <span className="font-medium">{props.lastTransaction.transaction_id}</span></div>
+              <div><span className="text-gray-600">Status:</span> <span className="font-medium capitalize">{props.lastTransaction.status}</span></div>
+              <div><span className="text-gray-600">Amount:</span> <span className="font-medium">{props.lastTransaction.currency || ''}{props.lastTransaction.amount}</span></div>
+              <div><span className="text-gray-600">Gateway:</span> <span className="font-medium uppercase">{props.lastTransaction.gateway}</span></div>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!donation) return;
+                  try {
+                    setChecking(true);
+                    const xsrf = document.cookie.split('; ').find((row) => row.startsWith('XSRF-TOKEN='))?.split('=')[1];
+                    const csrfMeta = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+                    const headers: Record<string, string> = {
+                      'X-Requested-With': 'XMLHttpRequest',
+                      'Content-Type': 'application/json',
+                    };
+                    if (xsrf) headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrf);
+                    if (csrfMeta) headers['X-CSRF-TOKEN'] = csrfMeta;
+                    const res = await fetch(route('donation.status', donation.id), {
+                      method: 'POST',
+                      headers,
+                      credentials: 'same-origin',
+                      body: JSON.stringify({ transaction_id: props.lastTransaction.transaction_id }),
+                    });
+                    const data = await res.json();
+                    if (data.ok && data.redirect) {
+                      window.location.href = data.redirect;
+                    } else if (data.ok) {
+                      alert(`Status: ${data.status}`);
+                      window.location.reload();
+                    } else {
+                      alert(data.message || 'Unable to check status');
+                    }
+                  } catch (e) {
+                    console.error(e);
+                    alert('Error checking status');
+                  } finally {
+                    setChecking(false);
+                  }
+                }}
+                disabled={checking || processing}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-white text-xs font-semibold ${checking || processing ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'}`}
+              >
+                {checking ? (
+                  <>
+                    <svg className="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    Checking…
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 6v6l4 2-.8 1.6L10 13V6z"/></svg>
+                    Check Status
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!donation) return;
+                  setSelectedGateway(props.lastTransaction.gateway);
+                  setProcessing(true);
+                  // Trigger form submit programmatically
+                  const form = document.querySelector('form[data-payment-form]') as HTMLFormElement | null;
+                  form?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                }}
+                disabled={processing || checking}
+                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-white text-xs font-semibold ${processing ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                {processing ? (
+                  <>
+                    <svg className="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    Reinitiating…
+                  </>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 5v4l3-3-3-3v2zM3 13h2a7 7 0 0 0 14 0h2a9 9 0 0 1-18 0z"/></svg>
+                    Reinitiate Payment
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <h2 className="text-lg font-semibold text-blue-700 mb-3">Select Payment Method</h2>
         {gateways.length > 0 ? (
           <form
+            data-payment-form
             onSubmit={async (e) => {
               e.preventDefault();
               if (!donation || !selectedGateway) return;
@@ -135,15 +253,11 @@ const PaymentSelection: React.FC = () => {
                 const data = await res.json();
                 if (data.ok && data.gateway === 'worldline') {
                   setProcessing(true);
-                  // Initialize Worldline and mount into container
-                  const result = await initWorldline(data.payload, '#paymentGatewayContainer');
+                  // Initialize Worldline (opens in new window flow)
+                  const result = await initWorldline(data.payload);
                   if (!result.ok) {
                     setProcessing(false);
                     alert(result.message || 'Worldline initialization failed.');
-                  } else {
-                    // scroll to processing container
-                    const container = document.getElementById('paymentProcessingContainer');
-                    if (container) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
                   }
                 } else {
                   alert(data.message || 'Unable to begin payment.');
@@ -215,17 +329,21 @@ const PaymentSelection: React.FC = () => {
             <div className="mt-6 text-center">
               <button
                 type="submit"
-                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-2.5 text-white text-sm font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                className={`inline-flex items-center justify-center rounded-md px-5 py-2.5 text-white text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 ${processing ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
                 disabled={!selectedGateway || processing}
               >
-                {processing ? 'Processing…' : 'Proceed to Payment'}
+                {processing ? (
+                  <>
+                    <svg className="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    Processing…
+                  </>
+                ) : (
+                  'Proceed to Payment'
+                )}
               </button>
-              <Link
-                href={route('home')}
-                className="inline-flex items-center justify-center rounded-md border border-gray-300 px-5 py-2.5 text-gray-700 text-sm font-semibold hover:bg-gray-50 ml-2"
-              >
-                Back to Form
-              </Link>
             </div>
           </form>
         ) : (
@@ -233,18 +351,6 @@ const PaymentSelection: React.FC = () => {
             No payment gateways are currently available.
           </div>
         )}
-        {/* Processing container for gateway widget */}
-        <div className={`mt-8 ${processing ? '' : 'hidden'}`} id="paymentProcessingContainer">
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <div className="mb-3">
-              <h4 className="font-semibold text-blue-800">Processing Payment</h4>
-              <p className="text-blue-700 text-sm">Please complete your payment using the selected gateway</p>
-            </div>
-            <div className="rounded-md border border-dashed border-blue-300 bg-white p-4">
-              <div id="paymentGatewayContainer" className="min-h-[120px]" />
-            </div>
-          </div>
-        </div>
         <div className="mt-8 text-xs text-gray-500 dark:text-neutral-500">
           <p className="dark:text-neutral-400">You will receive a confirmation email after successful payment.</p>
           <p className="mt-2 dark:text-neutral-400">Need help? <Link href="/support" className="text-blue-600 dark:text-blue-400 hover:underline">Contact support</Link>.</p>
