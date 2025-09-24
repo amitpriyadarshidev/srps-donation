@@ -7,15 +7,15 @@ use Inertia\Inertia;
 // Public routes
 Route::get('/', [DonationController::class, 'index'])->name('home');
 
-// Donation routes
-Route::post('/donation/process', [DonationController::class, 'process'])->name('donation.process');
-Route::get('/donation/{donation}/edit', [DonationController::class, 'edit'])->name('donation.edit');
-Route::put('/donation/{donation}', [DonationController::class, 'update'])->name('donation.update');
-Route::get('/donation/{donation}/payment', [DonationController::class, 'paymentSelection'])->name('donation.payment-selection');
-Route::get('/donation/{donation}/confirmation', [DonationController::class, 'confirmation'])->name('donation.confirmation');
-Route::post('/donation/{donation}/pay', [DonationController::class, 'beginPayment'])->name('donation.pay');
-Route::post('/donation/{donation}/status', [DonationController::class, 'checkStatus'])->name('donation.status');
-Route::match(['GET','POST'], '/payment/callback', [DonationController::class, 'paymentCallback'])->name('payment.callback');
+// Pay routes (short, user-friendly prefix)
+Route::post('/pay/process', [DonationController::class, 'process'])->name('donation.process');
+Route::get('/pay/{donation}/edit', [DonationController::class, 'edit'])->name('donation.edit');
+Route::put('/pay/{donation}', [DonationController::class, 'update'])->name('donation.update');
+Route::get('/pay/{donation}', [DonationController::class, 'paymentSelection'])->name('donation.payment-selection');
+Route::get('/pay/{donation}/confirmation', [DonationController::class, 'confirmation'])->name('donation.confirmation');
+Route::post('/pay/{donation}/pay', [DonationController::class, 'beginPayment'])->name('donation.pay');
+Route::post('/pay/{donation}/status', [DonationController::class, 'checkStatus'])->name('donation.status');
+Route::match(['GET','POST'], '/pay/callback', [DonationController::class, 'paymentCallback'])->name('payment.callback');
 
 // Protected routes
 Route::middleware(['auth', 'verified'])->group(function () {

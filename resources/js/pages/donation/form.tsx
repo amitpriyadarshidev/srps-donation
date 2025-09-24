@@ -1,13 +1,15 @@
 import { type SharedData } from '@/types';
 import { Country, Currency, Purpose, FormErrors } from '@/types/donation';
 import { Head, usePage } from '@inertiajs/react';
-import React, { useState, useEffect } from 'react';
+import { route } from 'ziggy-js';
+import React, { useState, useEffect, useRef } from 'react';
 import { router } from '@inertiajs/react';
 import { DonationFormData, State } from '@/types/donation';
 import { Combobox, ComboboxOption } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import DonationLayout from '@/layouts/donation-layout';
 
 interface DonationFormPageProps extends SharedData {
@@ -58,14 +60,14 @@ export default function DonationFormPage() {
         last_name: donation?.last_name || '',
         email: donation?.email || '',
         phone: donation?.phone || '',
-        phone_country_code: donation?.phone_country_code || detectedCountry?.phone_code || '',
+    phone_country_code: donation?.phone_country_code || (detectedCountry?.phone_code ? (detectedCountry.phone_code.startsWith('+') ? detectedCountry.phone_code : `+${detectedCountry.phone_code}`) : ''),
         tax_exemption: !!donation?.tax_exemption,
         pan_number: donation?.pan_number || '',
         documents: [{ type: '', file: null }],
         skip_kyc: !!donation?.skip_kyc,
         terms_accepted: false,
     });
-    const [states, setStates] = useState<State[]>(donation?.country?.states || []);
+    const [states, setStates] = useState<State[]>(donation?.country?.states || detectedCountry?.states || []);
     const [localErrors, setLocalErrors] = useState<FormErrors>(errors || {});
     const [isLoading, setIsLoading] = useState(false);
     const [currencySymbol, setCurrencySymbol] = useState('$');
@@ -79,10 +81,52 @@ export default function DonationFormPage() {
     const purposeOptions: ComboboxOption[] = purposes.map(p => ({ value: p.id, label: p.name, extra: (<div className="flex items-center gap-1"><span>{p.icon}</span><span className="text-xs text-muted-foreground">{p.category}</span></div>) }));
     const stateOptions: ComboboxOption[] = states.map(s => ({ value: s.id, label: s.name, extra: s.code }));
     const calculateCodeWidth = (code: string) => { const baseWidth = 80; const charWidth = 8; const padding = 16; return Math.max(baseWidth, (code?.length || 3) * charWidth + padding); };
-    const phoneCodeOptions: ComboboxOption[] = countries.map(c => ({ value: c.phone_code, label: `${c.flag_icon} ${c.phone_code}` }));
-    const loadStates = async (countryId: string, selectedStateId?: string) => { if (!countryId) { setStates([]); return; } try { const resp = await fetch(`/api/states?country_id=${countryId}`); const data = await resp.json(); setStates(data); if (selectedStateId) { setFormData(p => ({ ...p, state: selectedStateId })); } else { setFormData(p => ({ ...p, state: '' })); } } catch { setStates([]); } };
+    const phoneCodeOptions: ComboboxOption[] = React.useMemo(() => {
+        const map = new Map<string, string>();
+        for (const c of countries) {
+            const code = c.phone_code.startsWith('+') ? c.phone_code : `+${c.phone_code}`;
+            if (!map.has(code)) {
+                const label = `${c.flag_icon ?? ''} ${code}`.trim();
+                map.set(code, label);
+            }
+        }
+        return Array.from(map, ([value, label]) => ({ value, label }));
+    }, [countries]);
+    const [statesLoading, setStatesLoading] = useState(false);
+    const loadStates = async (countryId: string, selectedStateId?: string) => {
+        if (!countryId) { setStates([]); return; }
+        try {
+            setStatesLoading(true);
+            const resp = await fetch(`/api/states?country_id=${countryId}`);
+            const data = await resp.json();
+            setStates(data);
+            if (selectedStateId) { setFormData(p => ({ ...p, state: selectedStateId })); } else { setFormData(p => ({ ...p, state: '' })); }
+        } catch {
+            setStates([]);
+        } finally {
+            setStatesLoading(false);
+        }
+    };
     useEffect(() => { if (formData.currency) { const c = currencies.find(c => c.id === formData.currency); const sym = c?.symbol || '$'; setCurrencySymbol(sym); setSymbolWidth(calculateSymbolWidth(sym)); } }, [formData.currency, currencies]);
-    useEffect(() => { const cid = donation?.country_id || detectedCountry?.id; if (cid && !donation?.country?.states) { loadStates(cid, donation?.state_id); } }, [donation, detectedCountry]);
+    useEffect(() => { const cid = donation?.country_id || detectedCountry?.id; if (cid && !donation?.country?.states && !states.length) { loadStates(cid, donation?.state_id); } }, [donation, detectedCountry, states.length]);
+
+    // Apply initial country change behavior on first mount
+    const initialized = useRef(false);
+    const [initializing, setInitializing] = useState(true);
+    useEffect(() => {
+        if (initialized.current) return;
+        initialized.current = true;
+    const cid = donation?.country_id || detectedCountry?.id;
+    if (!cid) { setInitializing(false); return; }
+        if (!donation?.id) {
+            handleCountryChange(cid);
+        } else if (!states.length) {
+            const c = countries.find(c => c.id === cid);
+            if (c?.states) setStates(c.states);
+        }
+        setInitializing(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     const handleInputChange = (name: string, value: any) => { setFormData(p => ({ ...p, [name]: value })); if (localErrors[name]) { setLocalErrors(prev => { const ne = { ...prev }; delete ne[name]; return ne; }); } };
     const handleCountryChange = (id: string) => { handleInputChange('country', id); if (id) { const c = countries.find(c => c.id === id); if (c) { handleInputChange('currency', c.default_currency); const phoneCode = c.phone_code.startsWith('+') ? c.phone_code : `+${c.phone_code}`; handleInputChange('phone_country_code', phoneCode); if (c.states) { setStates(c.states); setFormData(p => ({ ...p, state: '' })); } else { loadStates(id); } } } else { setStates([]); setFormData(p => ({ ...p, state: '' })); } };
     const addDocument = () => setFormData(p => ({ ...p, documents: [...p.documents, { type: '', file: null }] }));
@@ -103,12 +147,12 @@ export default function DonationFormPage() {
             });
             if (donation?.id) {
                 fd.append('_method', 'PUT');
-                router.post(`/donation/${donation.id}`, fd, {
+                router.post(route('donation.update', { donation: donation.id }), fd, {
                     onSuccess: () => {},
                     onError: (errs) => { setLocalErrors(errs as FormErrors); setIsLoading(false); },
                 });
             } else {
-                router.post('/donation/process', fd, {
+                router.post(route('donation.process'), fd, {
                     onSuccess: () => {},
                     onError: (errs) => { setLocalErrors(errs as FormErrors); setIsLoading(false); },
                 });
@@ -133,7 +177,11 @@ export default function DonationFormPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Country <span className="text-red-500">*</span></label>
-                                    <Combobox options={countryOptions} value={formData.country} onValueChange={handleCountryChange} placeholder="Select Country" searchPlaceholder="Search countries..." emptyText="No country found." className={localErrors.country ? 'border-red-500' : ''} />
+                                    {initializing ? (
+                                        <Skeleton className="h-9 w-full" />
+                                    ) : (
+                                        <Combobox options={countryOptions} value={formData.country} onValueChange={handleCountryChange} placeholder="Select Country" searchPlaceholder="Search countries..." emptyText="No country found." className={localErrors.country ? 'border-red-500' : ''} />
+                                    )}
                                     {localErrors.country && <p className="mt-1 text-sm text-red-600">{localErrors.country}</p>}
                                 </div>
                                 <div>
@@ -143,14 +191,24 @@ export default function DonationFormPage() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Currency <span className="text-red-500">*</span></label>
-                                    <Combobox options={currencyOptions} value={formData.currency} onValueChange={(v) => handleInputChange('currency', v)} placeholder="Select Currency" searchPlaceholder="Search currencies..." emptyText="No currency found." className={localErrors.currency ? 'border-red-500' : ''} />
+                                    {initializing ? (
+                                        <Skeleton className="h-9 w-full" />
+                                    ) : (
+                                        <Combobox options={currencyOptions} value={formData.currency} onValueChange={(v) => handleInputChange('currency', v)} placeholder="Select Currency" searchPlaceholder="Search currencies..." emptyText="No currency found." className={localErrors.currency ? 'border-red-500' : ''} />
+                                    )}
                                     {localErrors.currency && <p className="mt-1 text-sm text-red-600">{localErrors.currency}</p>}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">Amount <span className="text-red-500">*</span></label>
                                     <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none z-10" style={{ width: `${symbolWidth + 12}px` }}><span className="text-gray-500 text-sm font-medium">{currencySymbol}</span></div>
-                                        <Input type="text" value={formData.amount} onChange={(e) => handleInputChange('amount', e.target.value)} placeholder="Enter Amount to Pay" className={localErrors.amount ? 'border-red-500' : ''} style={{ paddingLeft: `${symbolWidth + 12}px` }} />
+                                        {initializing ? (
+                                            <Skeleton className="h-9 w-full" />
+                                        ) : (
+                                            <>
+                                                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none z-10" style={{ width: `${symbolWidth + 12}px` }}><span className="text-gray-500 text-sm font-medium">{currencySymbol}</span></div>
+                                                <Input type="text" value={formData.amount} onChange={(e) => handleInputChange('amount', e.target.value)} placeholder="Enter Amount to Pay" className={localErrors.amount ? 'border-red-500' : ''} style={{ paddingLeft: `${symbolWidth + 12}px` }} />
+                                            </>
+                                        )}
                                     </div>
                                     {localErrors.amount && <p className="mt-1 text-sm text-red-600">{localErrors.amount}</p>}
                                     <p className="mt-1 text-sm text-gray-500">Processing fee as 5% of total amount would be charged.</p>
@@ -175,7 +233,11 @@ export default function DonationFormPage() {
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 mb-2">State/Province <span className="text-red-500">*</span></label>
-                                    <Combobox options={stateOptions} value={formData.state} onValueChange={(v) => handleInputChange('state', v)} placeholder="Select State" searchPlaceholder="Search states..." emptyText="No state found." className={localErrors.state ? 'border-red-500' : ''} />
+                                    {statesLoading ? (
+                                        <Skeleton className="h-9 w-full" />
+                                    ) : (
+                                        <Combobox options={stateOptions} value={formData.state} onValueChange={(v) => handleInputChange('state', v)} placeholder="Select State" searchPlaceholder="Search states..." emptyText="No state found." className={localErrors.state ? 'border-red-500' : ''} />
+                                    )}
                                     {localErrors.state && <p className="mt-1 text-sm text-red-600">{localErrors.state}</p>}
                                 </div>
                                 <div>

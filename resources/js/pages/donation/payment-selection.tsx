@@ -43,6 +43,7 @@ const PaymentSelection: React.FC = () => {
   const [logoError, setLogoError] = useState<Record<string, boolean>>({});
   const [processing, setProcessing] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [copiedTxn, setCopiedTxn] = useState(false);
 
   useEffect(() => {
     if (!donation) return;
@@ -128,15 +129,51 @@ const PaymentSelection: React.FC = () => {
           <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M12 22a10 10 0 1 1 10-10 10.011 10.011 0 0 1-10 10zm1-10V7h-2v7h6v-2z"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5"><path d="M12 22a10 10 0 1 1 10-10 10.011 10.011 0 0 1-10 10zm1-10V7h-2v7h6v-2z" /></svg>
                 <span className="font-semibold">Last Transaction</span>
               </div>
-              <span className="text-xs font-medium">{new Date(props.lastTransaction.started_at || Date.now()).toLocaleString()}</span>
+              <div className="flex items-center gap-2">
+                <span className={`uppercase inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${props.lastTransaction.status === 'completed' ? 'bg-green-50 text-green-700 border-green-200' : props.lastTransaction.status === 'failed' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+                  {props.lastTransaction.status}
+                </span>
+                <span className="text-xs font-medium">{new Date(props.lastTransaction.started_at || Date.now()).toLocaleString()}</span>
+              </div>
             </div>
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-4 gap-2 text-sm">
-              <div><span className="text-gray-600">Txn:</span> <span className="font-medium">{props.lastTransaction.transaction_id}</span></div>
-              <div><span className="text-gray-600">Status:</span> <span className="font-medium capitalize">{props.lastTransaction.status}</span></div>
-              <div><span className="text-gray-600">Amount:</span> <span className="font-medium">{props.lastTransaction.currency || ''}{props.lastTransaction.amount}</span></div>
+              <div className="sm:col-span-2 flex items-center gap-2 min-w-0">
+                <span className="text-gray-600">Txn:</span>
+                <span className="font-medium break-all">{props.lastTransaction.transaction_id}</span>
+                <button
+                  type="button"
+                  title="Copy transaction ID"
+                  aria-label="Copy transaction ID"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(String(props.lastTransaction.transaction_id || ''));
+                      setCopiedTxn(true);
+                      setTimeout(() => setCopiedTxn(false), 1500);
+                    } catch (e) {
+                      console.error(e);
+                      alert('Copy failed');
+                    }
+                  }}
+                  className="ml-1 inline-flex items-center rounded p-1 text-gray-600 hover:text-gray-800 hover:bg-gray-100"
+                >
+                  {copiedTxn ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4 text-green-600">
+                      <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+                      <path d="M16 1H4a2 2 0 0 0-2 2v12h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z" />
+                    </svg>
+                  )}
+                </button>
+                {copiedTxn ? (
+                  <span className="text-[10px] font-semibold text-green-600">Copied</span>
+                ) : null}
+              </div>
+              <div className="text-right"><span className="text-gray-600">Amount:</span> <span className="font-medium">{props.lastTransaction.currency || ''}{props.lastTransaction.amount}</span></div>
               <div><span className="text-gray-600">Gateway:</span> <span className="font-medium uppercase">{props.lastTransaction.gateway}</span></div>
             </div>
             <div className="mt-3 flex gap-2">
@@ -189,7 +226,7 @@ const PaymentSelection: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 6v6l4 2-.8 1.6L10 13V6z"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 6v6l4 2-.8 1.6L10 13V6z" /></svg>
                     Check Status
                   </>
                 )}
@@ -217,7 +254,7 @@ const PaymentSelection: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 5v4l3-3-3-3v2zM3 13h2a7 7 0 0 0 14 0h2a9 9 0 0 1-18 0z"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 5v4l3-3-3-3v2zM3 13h2a7 7 0 0 0 14 0h2a9 9 0 0 1-18 0z" /></svg>
                     Reinitiate Payment
                   </>
                 )}

@@ -10,6 +10,7 @@ use App\Models\Purpose;
 use App\Models\PaymentGateway;
 use App\Models\Transaction;
 use App\Services\EmailService;
+use App\Services\CountryDetectionService;
 use App\Services\TransactionSessionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -19,16 +20,18 @@ use Inertia\Inertia;
 class DonationController extends Controller
 {
     protected $emailService;
+    protected $countryDetection;
 
-    public function __construct(EmailService $emailService)
+    public function __construct(EmailService $emailService, CountryDetectionService $countryDetection)
     {
         $this->emailService = $emailService;
+        $this->countryDetection = $countryDetection;
     }
 
     /**
      * Display the donation form home page
      */
-    public function index()
+    public function index(Request $request)
     {
         // Fetch dynamic data from database
         $countries = Country::active()
@@ -45,8 +48,9 @@ class DonationController extends Controller
             ->orderBy('sort_order')
             ->get(['id', 'name', 'slug', 'description', 'category', 'icon']);
 
-        // Simple country detection based on locale (can be enhanced with IP geolocation)
-        $detectedCountry = $countries->where('code', 'US')->first();
+        // Auto-detect country using IP (fallback to IN)
+    $detected = $this->countryDetection->detectCountry($request);
+    $detectedCountry = $detected ? $countries->firstWhere('id', $detected->id) : null;
 
     return Inertia::render('donation/form', [
             'countries' => $countries,
