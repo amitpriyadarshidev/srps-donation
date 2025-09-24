@@ -39,6 +39,7 @@ return new class extends Migration
             $table->json('kyc_documents')->nullable();
             $table->boolean('skip_kyc')->default(false);
             $table->boolean('tax_exemption')->default(false);
+            $table->boolean('terms_accepted')->default(false);
             $table->string('pan_number', 20)->nullable();
             
             // Payment Method

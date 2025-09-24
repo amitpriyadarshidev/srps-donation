@@ -117,6 +117,7 @@ class DonationController extends Controller
                 'purpose_id' => $validated['purpose'],
                 'skip_kyc' => $validated['skip_kyc'] ?? false,
                 'tax_exemption' => $validated['tax_exemption'] ?? false,
+                'terms_accepted' => $validated['terms_accepted'] ?? false,
                 'pan_number' => $validated['pan_number'] ?? null,
             ]);
 
@@ -163,6 +164,7 @@ class DonationController extends Controller
                 'kyc_documents' => json_encode([]), // Will be updated when file upload is implemented
                 'skip_kyc' => $validated['skip_kyc'] ?? false,
                 'tax_exemption' => $validated['tax_exemption'] ?? false,
+                'terms_accepted' => $validated['terms_accepted'] ?? false,
                 'pan_number' => $validated['pan_number'] ?? null,
                 'alternative_method' => $validated['alternative_method'] ?? false,
                 'status' => 'pending'

@@ -37,9 +37,13 @@ const PaymentSelection: React.FC = () => {
   const donation = props.donation;
   const flash = props.flash || {};
   const gateways = props.gateways || [];
-  const [selectedGateway, setSelectedGateway] = useState<string | null>(
-    gateways.find((g) => g.is_default)?.code || gateways[0]?.code || null
-  );
+  const [selectedGateway, setSelectedGateway] = useState<string | null>(() => {
+    const lastFailedCode = props.lastTransaction?.status === 'failed' && props.lastTransaction?.gateway
+      ? props.lastTransaction.gateway
+      : null;
+    const inList = lastFailedCode && gateways.some(g => g.code === lastFailedCode);
+    return (inList ? lastFailedCode : (gateways.find((g) => g.is_default)?.code || gateways[0]?.code || null));
+  });
   const [logoError, setLogoError] = useState<Record<string, boolean>>({});
   const [processing, setProcessing] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -233,13 +237,48 @@ const PaymentSelection: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  if (!donation) return;
-                  setSelectedGateway(props.lastTransaction.gateway);
-                  setProcessing(true);
-                  // Trigger form submit programmatically
-                  const form = document.querySelector('form[data-payment-form]') as HTMLFormElement | null;
-                  form?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+                onClick={async () => {
+                  if (!donation || !props.lastTransaction?.gateway) return;
+                  try {
+                    setProcessing(true);
+                    const xsrf = document.cookie.split('; ').find((row) => row.startsWith('XSRF-TOKEN='))?.split('=')[1];
+                    const csrfMeta = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+                    const headers: Record<string, string> = {
+                      'X-Requested-With': 'XMLHttpRequest',
+                      'Content-Type': 'application/json',
+                    };
+                    if (xsrf) headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrf);
+                    if (csrfMeta) headers['X-CSRF-TOKEN'] = csrfMeta;
+
+                    const res = await fetch(route('donation.pay', donation.id), {
+                      method: 'POST',
+                      headers,
+                      credentials: 'same-origin',
+                      body: JSON.stringify({
+                        gateway: props.lastTransaction.gateway,
+                        retry_transaction_id: props.lastTransaction.transaction_id,
+                      }),
+                    });
+                    const data = await res.json();
+                    if (data.ok && data.alreadyCompleted && data.redirect) {
+                      window.location.href = data.redirect;
+                      return;
+                    }
+                    if (data.ok && data.gateway === 'worldline') {
+                      const result = await initWorldline(data.payload);
+                      if (!result.ok) {
+                        setProcessing(false);
+                        alert(result.message || 'Worldline initialization failed.');
+                      }
+                    } else {
+                      setProcessing(false);
+                      alert(data.message || 'Unable to begin payment.');
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    setProcessing(false);
+                    alert('Error initiating payment.');
+                  }
                 }}
                 disabled={processing || checking}
                 className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-white text-xs font-semibold ${processing ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}

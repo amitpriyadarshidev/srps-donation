@@ -64,7 +64,7 @@ export default function DonationFormPage() {
     pan_number: donation?.pan_number || '',
     documents: [{ type: '', file: null }],
     skip_kyc: !!donation?.skip_kyc,
-    terms_accepted: false,
+    terms_accepted: !!donation?.terms_accepted,
   });
   const [states, setStates] = useState<State[]>(donation?.country?.states || detectedCountry?.states || []);
   const [localErrors, setLocalErrors] = useState<FormErrors>(errors || {});
