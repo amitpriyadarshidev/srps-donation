@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { usePage, Head, Link } from '@inertiajs/react';
-import { initWorldline } from '@/payment/worldline';
+import { initGateway } from '@/payment/init';
 import DonationLayout from '@/layouts/donation-layout';
 
 interface Donation {
@@ -264,11 +264,11 @@ const PaymentSelection: React.FC = () => {
                       window.location.href = data.redirect;
                       return;
                     }
-                    if (data.ok && data.gateway === 'worldline') {
-                      const result = await initWorldline(data.payload);
+                    if (data.ok && data.gateway) {
+                      const result = await initGateway(data.gateway, data.payload);
                       if (!result.ok) {
                         setProcessing(false);
-                        alert(result.message || 'Worldline initialization failed.');
+                        alert(result.message || 'Payment initialization failed.');
                       }
                     } else {
                       setProcessing(false);
@@ -336,13 +336,12 @@ const PaymentSelection: React.FC = () => {
                   window.location.href = data.redirect;
                   return;
                 }
-                if (data.ok && data.gateway === 'worldline') {
+                if (data.ok && data.gateway) {
                   setProcessing(true);
-                  // Initialize Worldline (opens in new window flow)
-                  const result = await initWorldline(data.payload);
+                  const result = await initGateway(data.gateway, data.payload);
                   if (!result.ok) {
                     setProcessing(false);
-                    alert(result.message || 'Worldline initialization failed.');
+                    alert(result.message || 'Payment initialization failed.');
                   }
                 } else {
                   alert(data.message || 'Unable to begin payment.');
