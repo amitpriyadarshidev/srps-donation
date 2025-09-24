@@ -173,8 +173,8 @@ const PaymentSelection: React.FC = () => {
                   <span className="text-[10px] font-semibold text-green-600">Copied</span>
                 ) : null}
               </div>
-              <div className="text-right"><span className="text-gray-600">Amount:</span> <span className="font-medium">{props.lastTransaction.currency || ''}{props.lastTransaction.amount}</span></div>
-              <div><span className="text-gray-600">Gateway:</span> <span className="font-medium uppercase">{props.lastTransaction.gateway}</span></div>
+              <div className="text-center"><span className="text-gray-600">Amount:</span> <span className="font-medium">{props.lastTransaction.currency || ''}{props.lastTransaction.amount}</span></div>
+              <div className="text-right"><span className="text-gray-600">Gateway:</span> <span className="font-medium uppercase">{props.lastTransaction.gateway}</span></div>
             </div>
             <div className="mt-3 flex gap-2">
               <button
