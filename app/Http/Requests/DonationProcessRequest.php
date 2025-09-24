@@ -64,14 +64,11 @@ class DonationProcessRequest extends FormRequest
             // Legal requirements
             'terms_accepted' => 'required|accepted',
             
-            // File uploads (if any)
-            'documents' => 'nullable|array|min:1|max:5',
-            'documents.*.type' => 'required_with:documents|string|min:2|max:100',
-            'documents.*.file' => 'required_with:documents|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max per file
-            
-            // Legacy KYC documents field (for backward compatibility)
-            'kyc_documents' => 'nullable|array|max:5',
-            'kyc_documents.*' => 'file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max per file
+            // File uploads (conditional on not skipping KYC)
+            // If skip_kyc is 1/true, documents are not required and nested rules are excluded
+            'documents' => 'required_unless:skip_kyc,1|array|min:1|max:5',
+            'documents.*.type' => 'exclude_if:skip_kyc,1|required_with:documents|string|min:2|max:100',
+            'documents.*.file' => 'exclude_if:skip_kyc,1|required_with:documents|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max per file
         ];
     }
 
@@ -141,6 +138,7 @@ class DonationProcessRequest extends FormRequest
             'terms_accepted.accepted' => 'You must accept the terms and conditions to proceed.',
             
             // File upload messages
+            'documents.required_unless' => 'At least one KYC document is required when KYC is not skipped.',
             'documents.min' => 'At least one KYC document is required.',
             'documents.max' => 'You can upload a maximum of :max KYC documents.',
             'documents.*.type.required_with' => 'Document type is required for each uploaded document.',
@@ -150,12 +148,6 @@ class DonationProcessRequest extends FormRequest
             'documents.*.file.file' => 'Each KYC document must be a valid file.',
             'documents.*.file.mimes' => 'KYC documents must be PDF, JPG, JPEG, or PNG files.',
             'documents.*.file.max' => 'Each KYC document cannot exceed 5MB.',
-            
-            // Legacy KYC documents messages
-            'kyc_documents.max' => 'You can upload a maximum of :max KYC documents.',
-            'kyc_documents.*.file' => 'Each KYC document must be a valid file.',
-            'kyc_documents.*.mimes' => 'KYC documents must be PDF, JPG, JPEG, or PNG files.',
-            'kyc_documents.*.max' => 'Each KYC document cannot exceed 5MB.',
         ];
     }
 
@@ -182,7 +174,6 @@ class DonationProcessRequest extends FormRequest
             'phone_country_code' => 'country code',
             'pan_number' => 'PAN number',
             'terms_accepted' => 'terms and conditions',
-            'kyc_documents' => 'KYC documents',
         ];
     }
 
@@ -197,13 +188,8 @@ class DonationProcessRequest extends FormRequest
                 $validator->errors()->add('pan_number', 'PAN number is required when claiming tax exemption.');
             }
 
-            // Custom validation: KYC documents required if not skipping KYC and field entirely absent
-            if (!$this->input('skip_kyc') && !$this->has('documents')) {
-                $validator->errors()->add('documents', 'At least one KYC document is required when KYC is not skipped.');
-            }
-
             // Custom validation: Optional extra file integrity check only (avoid duplicating required messages)
-            if ($this->has('documents') && is_array($this->input('documents'))) {
+            if (!$this->boolean('skip_kyc') && $this->has('documents') && is_array($this->input('documents'))) {
                 foreach (array_keys($this->input('documents')) as $index) {
                     $uploadedFile = $this->file("documents.$index.file");
                     if ($uploadedFile instanceof \Illuminate\Http\UploadedFile && !$uploadedFile->isValid()) {
