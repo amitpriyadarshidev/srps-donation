@@ -7,6 +7,7 @@ use App\Models\Donation;
 use App\Models\Country;
 use App\Models\Currency;
 use App\Models\Purpose;
+use App\Models\PaymentGateway;
 use App\Services\EmailService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -86,8 +87,8 @@ class DonationController extends Controller
                 'status' => 'pending'
             ]);
 
-            // Handle KYC document uploads if any
-            if ($request->has('documents') || $request->hasFile('kyc_documents')) {
+            // Handle KYC document uploads if any (new structure only)
+            if ($request->has('documents')) {
                 $this->handleKycDocuments($request, $donation);
             }
 
@@ -109,7 +110,7 @@ class DonationController extends Controller
             Log::error('Donation processing error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'input' => $request->except(['kyc_documents']) // Exclude file uploads from log
+                'input' => $request->except(['documents']) // Exclude file uploads from log
             ]);
 
             return back()->withErrors([
@@ -189,8 +190,13 @@ class DonationController extends Controller
         $donation = Donation::with(['country', 'currency', 'purpose'])
             ->findOrFail($donationId);
 
+        $gateways = PaymentGateway::active()
+            ->orderBy('display_order')
+            ->get(['id', 'name', 'code', 'logo', 'description', 'is_default']);
+
         return inertia('donation/payment-selection', [
-            'donation' => $donation
+            'donation' => $donation,
+            'gateways' => $gateways,
         ]);
     }
 

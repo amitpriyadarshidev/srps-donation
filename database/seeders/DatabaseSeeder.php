@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
             CountriesSeeder::class,
             StatesSeeder::class,
             PurposesSeeder::class,
+            PaymentGatewaySeeder::class,
         ]);
     }
 }
