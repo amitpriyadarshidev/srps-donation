@@ -250,12 +250,12 @@ const PaymentSelection: React.FC = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
                     </svg>
-                    Reinitiating…
+                    Retrying…
                   </>
                 ) : (
                   <>
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 5v4l3-3-3-3v2zM3 13h2a7 7 0 0 0 14 0h2a9 9 0 0 1-18 0z" /></svg>
-                    Reinitiate Payment
+                    Retry Payment
                   </>
                 )}
               </button>
@@ -281,13 +281,22 @@ const PaymentSelection: React.FC = () => {
                 if (xsrf) headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrf);
                 if (csrfMeta) headers['X-CSRF-TOKEN'] = csrfMeta;
 
+                const payload: any = { gateway: selectedGateway };
+                if (props.lastTransaction && selectedGateway === props.lastTransaction.gateway) {
+                  payload.retry_transaction_id = props.lastTransaction.transaction_id;
+                }
+
                 const res = await fetch(route('donation.pay', donation.id), {
                   method: 'POST',
                   headers,
                   credentials: 'same-origin',
-                  body: JSON.stringify({ gateway: selectedGateway }),
+                  body: JSON.stringify(payload),
                 });
                 const data = await res.json();
+                if (data.ok && data.alreadyCompleted && data.redirect) {
+                  window.location.href = data.redirect;
+                  return;
+                }
                 if (data.ok && data.gateway === 'worldline') {
                   setProcessing(true);
                   // Initialize Worldline (opens in new window flow)
@@ -377,6 +386,8 @@ const PaymentSelection: React.FC = () => {
                     </svg>
                     Processing…
                   </>
+                ) : selectedGateway === props.lastTransaction?.gateway ? (
+                  'Retry Payment'
                 ) : (
                   'Proceed to Payment'
                 )}

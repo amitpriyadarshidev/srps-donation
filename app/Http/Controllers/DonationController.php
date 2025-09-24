@@ -316,6 +316,7 @@ class DonationController extends Controller
     {
         $request->validate([
             'gateway' => 'required|string|exists:payment_gateways,code',
+            'retry_transaction_id' => 'sometimes|uuid',
         ]);
 
         $donation = Donation::with(['currency', 'purpose'])->findOrFail($donationId);
@@ -332,61 +333,137 @@ class DonationController extends Controller
             ], 422);
         }
 
-            // Build a transaction reference with gateway-based prefix for traceability
-            $prefix = strtoupper(substr($gateway->code, 0, 3));
-            $txnId = $prefix . '-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(6));
+        // If retrying an existing transaction, verify and reuse same gateway reference
+        $retryTxnUuid = $request->input('retry_transaction_id');
+        if ($retryTxnUuid) {
+            $existing = Transaction::where('id', $retryTxnUuid)
+                ->where('donation_id', $donation->id)
+                ->first();
 
-            $response = $service->initializePayment([
-                'amount' => (float) $donation->amount * 1.05, // include 5% fee
-                'currency' => $donation->currency->code ?? 'INR',
-                'transaction_id' => $txnId,
-                'donor_id' => $donation->id,
-                'name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
-                'email' => $donation->email,
-                'phone' => $donation->phone,
-                'phone_country_code' => $donation->phone_country_code,
-            ]);
+            if ($existing && optional($existing->gateway)->id === $gateway->id) {
+                $ref = $existing->gateway_transaction_id ?: $existing->gateway_token;
+                if ($ref) {
+                    $verify = $service->verifyPayment((string)$ref, optional($existing->created_at)->format('d-m-Y'));
 
-            if (!($response['success'] ?? false)) {
-                return response()->json([
-                    'ok' => false,
-                    'message' => 'Failed to initialize payment',
-                ], 422);
+                    if (!empty($verify['success'])) {
+                        $existing->status = 'completed';
+                        if (!empty($verify['token_identifier'])) {
+                            $existing->gateway_token = $verify['token_identifier'];
+                        }
+                        $existing->gateway_response = array_merge((array)$existing->gateway_response ?? [], ['verify' => $verify]);
+                        $existing->save();
+
+                        (new TransactionSessionService())->updateStatus($existing->id, $existing->status);
+
+                        return response()->json([
+                            'ok' => true,
+                            'alreadyCompleted' => true,
+                            'redirect' => route('donation.confirmation', $donation->id),
+                        ]);
+                    }
+
+                    // Not completed: re-initiate using same gateway reference
+                    $response = $service->initializePayment([
+                        'amount' => (float) $donation->amount * 1.05,
+                        'currency' => $donation->currency->code ?? 'INR',
+                        'transaction_id' => $ref,
+                        'donor_id' => $donation->id,
+                        'name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
+                        'email' => $donation->email,
+                        'phone' => $donation->phone,
+                        'phone_country_code' => $donation->phone_country_code,
+                    ]);
+
+                    if (!($response['success'] ?? false)) {
+                        return response()->json([
+                            'ok' => false,
+                            'message' => 'Failed to initialize payment',
+                        ], 422);
+                    }
+
+                    // Mark as pending again and refresh session snapshot
+                    $existing->status = 'pending';
+                    $existing->save();
+                    (new TransactionSessionService())->store($existing->id, [
+                        'donation_id' => $donation->id,
+                        'amount' => (float) $donation->amount * 1.05,
+                        'currency' => $donation->currency->symbol ?? '',
+                        'donor_name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
+                        'email' => $donation->email,
+                        'phone' => ($donation->phone_country_code ?? '') . ($donation->phone ?? ''),
+                        'status' => 'pending',
+                        'gateway' => $gateway->code,
+                    ]);
+
+                    return response()->json([
+                        'ok' => true,
+                        'gateway' => $gateway->code,
+                        'payload' => [
+                            'form_data' => $response['data'] ?? [],
+                            'mer_array' => $response['mer_array'] ?? [],
+                            'environment' => $env,
+                            'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
+                        ],
+                    ]);
+                }
             }
+            // If mismatch or missing ref, fall through to create a new transaction as before
+        }
 
-            // Persist transaction in DB
-            $transaction = Transaction::create([
-                'donation_id' => $donation->id,
-                'payment_gateway_id' => $gateway->id,
-                // Our outbound reference for the gateway
-                'gateway_transaction_id' => $txnId,
-                'amount' => (float) $donation->amount * 1.05,
-                'currency_id' => $donation->currency_id,
-                'status' => 'pending',
-            ]);
+        // Build a new transaction reference with gateway-based prefix
+        $prefix = strtoupper(substr($gateway->code, 0, 3));
+        $txnId = $prefix . '-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(6));
 
-            // Store optimized session snapshot (legacy behavior)
-            (new TransactionSessionService())->store($transaction->id, [
-                'donation_id' => $donation->id,
-                'amount' => (float) $donation->amount * 1.05,
-                'currency' => $donation->currency->symbol ?? '',
-                'donor_name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
-                'email' => $donation->email,
-                'phone' => ($donation->phone_country_code ?? '') . ($donation->phone ?? ''),
-                'status' => 'pending',
-                'gateway' => $gateway->code,
-            ]);
+        $response = $service->initializePayment([
+            'amount' => (float) $donation->amount * 1.05, // include 5% fee
+            'currency' => $donation->currency->code ?? 'INR',
+            'transaction_id' => $txnId,
+            'donor_id' => $donation->id,
+            'name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
+            'email' => $donation->email,
+            'phone' => $donation->phone,
+            'phone_country_code' => $donation->phone_country_code,
+        ]);
 
+        if (!($response['success'] ?? false)) {
             return response()->json([
-                'ok' => true,
-                'gateway' => $gateway->code,
-                'payload' => [
-                    'form_data' => $response['data'] ?? [],
-                    'mer_array' => $response['mer_array'] ?? [],
-                    'environment' => $env,
-                    'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
-                ],
-            ]);
+                'ok' => false,
+                'message' => 'Failed to initialize payment',
+            ], 422);
+        }
+
+        // Persist transaction in DB
+        $transaction = Transaction::create([
+            'donation_id' => $donation->id,
+            'payment_gateway_id' => $gateway->id,
+            'gateway_transaction_id' => $txnId,
+            'amount' => (float) $donation->amount * 1.05,
+            'currency_id' => $donation->currency_id,
+            'status' => 'pending',
+        ]);
+
+        // Store optimized session snapshot
+        (new TransactionSessionService())->store($transaction->id, [
+            'donation_id' => $donation->id,
+            'amount' => (float) $donation->amount * 1.05,
+            'currency' => $donation->currency->symbol ?? '',
+            'donor_name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
+            'email' => $donation->email,
+            'phone' => ($donation->phone_country_code ?? '') . ($donation->phone ?? ''),
+            'status' => 'pending',
+            'gateway' => $gateway->code,
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'gateway' => $gateway->code,
+            'payload' => [
+                'form_data' => $response['data'] ?? [],
+                'mer_array' => $response['mer_array'] ?? [],
+                'environment' => $env,
+                'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
+            ],
+        ]);
     }
 
     /**
