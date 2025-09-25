@@ -38,11 +38,12 @@ const PaymentSelection: React.FC = () => {
   const flash = props.flash || {};
   const gateways = props.gateways || [];
   const [selectedGateway, setSelectedGateway] = useState<string | null>(() => {
-    const lastFailedCode = props.lastTransaction?.status === 'failed' && props.lastTransaction?.gateway
-      ? props.lastTransaction.gateway
-      : null;
-    const inList = lastFailedCode && gateways.some(g => g.code === lastFailedCode);
-    return (inList ? lastFailedCode : (gateways.find((g) => g.is_default)?.code || gateways[0]?.code || null));
+    const active = (gateways || []).filter((g) => g.is_active);
+    const lastCode = props.lastTransaction?.gateway ?? null;
+    const inList = !!lastCode && active.some((g) => g.code === lastCode);
+    return inList
+      ? lastCode
+      : (active.find((g) => g.is_default)?.code || active[0]?.code || null);
   });
   const [logoError, setLogoError] = useState<Record<string, boolean>>({});
   const [processing, setProcessing] = useState(false);
@@ -62,6 +63,24 @@ const PaymentSelection: React.FC = () => {
       purpose: donation.purpose?.name,
     };
   }, [donation]);
+
+  // If last transaction failed and that gateway is available, prefer it by default when options load
+  useEffect(() => {
+    if (!gateways || gateways.length === 0) return;
+    // If user already has a valid selection, don't override
+    const hasValidSelection = !!selectedGateway && gateways.some((g) => g.code === selectedGateway && g.is_active);
+    if (hasValidSelection) return;
+
+    const active = (gateways || []).filter((g) => g.is_active);
+    const lastCode = props.lastTransaction?.gateway ?? null;
+    const inList = !!lastCode && active.some((g) => g.code === lastCode);
+    const preferred = inList
+      ? lastCode
+      : (active.find((g) => g.is_default)?.code || active[0]?.code || null);
+    if (preferred && preferred !== selectedGateway) {
+      setSelectedGateway(preferred);
+    }
+  }, [gateways, props.lastTransaction]);
 
   return (
     <DonationLayout title="Payment">
@@ -235,69 +254,6 @@ const PaymentSelection: React.FC = () => {
                   </>
                 )}
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!donation || !props.lastTransaction?.gateway) return;
-                  try {
-                    setProcessing(true);
-                    const xsrf = document.cookie.split('; ').find((row) => row.startsWith('XSRF-TOKEN='))?.split('=')[1];
-                    const csrfMeta = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-                    const headers: Record<string, string> = {
-                      'X-Requested-With': 'XMLHttpRequest',
-                      'Content-Type': 'application/json',
-                    };
-                    if (xsrf) headers['X-XSRF-TOKEN'] = decodeURIComponent(xsrf);
-                    if (csrfMeta) headers['X-CSRF-TOKEN'] = csrfMeta;
-
-                    const res = await fetch(route('donation.pay', donation.id), {
-                      method: 'POST',
-                      headers,
-                      credentials: 'same-origin',
-                      body: JSON.stringify({
-                        gateway: props.lastTransaction.gateway,
-                        retry_transaction_id: props.lastTransaction.transaction_id,
-                      }),
-                    });
-                    const data = await res.json();
-                    if (data.ok && data.alreadyCompleted && data.redirect) {
-                      window.location.href = data.redirect;
-                      return;
-                    }
-                    if (data.ok && data.gateway) {
-                      const result = await initGateway(data.gateway, data.payload);
-                      if (!result.ok) {
-                        setProcessing(false);
-                        alert(result.message || 'Payment initialization failed.');
-                      }
-                    } else {
-                      setProcessing(false);
-                      alert(data.message || 'Unable to begin payment.');
-                    }
-                  } catch (err) {
-                    console.error(err);
-                    setProcessing(false);
-                    alert('Error initiating payment.');
-                  }
-                }}
-                disabled={processing || checking}
-                className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-white text-xs font-semibold ${processing ? 'bg-blue-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-              >
-                {processing ? (
-                  <>
-                    <svg className="-ml-1 mr-2 h-4 w-4 animate-spin text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden>
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                    </svg>
-                    Retrying…
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4"><path d="M12 5v4l3-3-3-3v2zM3 13h2a7 7 0 0 0 14 0h2a9 9 0 0 1-18 0z" /></svg>
-                    Retry Payment
-                  </>
-                )}
-              </button>
             </div>
           </div>
         ) : null}
@@ -310,6 +266,7 @@ const PaymentSelection: React.FC = () => {
               e.preventDefault();
               if (!donation || !selectedGateway) return;
               try {
+                setProcessing(true);
                 // Try to read XSRF-TOKEN cookie (set by Laravel when using VerifyCsrfToken)
                 const xsrf = document.cookie.split('; ').find((row) => row.startsWith('XSRF-TOKEN='))?.split('=')[1];
                 const csrfMeta = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -321,9 +278,6 @@ const PaymentSelection: React.FC = () => {
                 if (csrfMeta) headers['X-CSRF-TOKEN'] = csrfMeta;
 
                 const payload: any = { gateway: selectedGateway };
-                if (props.lastTransaction && selectedGateway === props.lastTransaction.gateway) {
-                  payload.retry_transaction_id = props.lastTransaction.transaction_id;
-                }
 
                 const res = await fetch(route('donation.pay', donation.id), {
                   method: 'POST',
@@ -337,17 +291,18 @@ const PaymentSelection: React.FC = () => {
                   return;
                 }
                 if (data.ok && data.gateway) {
-                  setProcessing(true);
                   const result = await initGateway(data.gateway, data.payload);
                   if (!result.ok) {
                     setProcessing(false);
                     alert(result.message || 'Payment initialization failed.');
                   }
                 } else {
+                  setProcessing(false);
                   alert(data.message || 'Unable to begin payment.');
                 }
               } catch (err) {
                 console.error(err);
+                setProcessing(false);
                 alert('Error initiating payment.');
               }
             }}
@@ -424,8 +379,6 @@ const PaymentSelection: React.FC = () => {
                     </svg>
                     Processing…
                   </>
-                ) : selectedGateway === props.lastTransaction?.gateway ? (
-                  'Retry Payment'
                 ) : (
                   'Proceed to Payment'
                 )}

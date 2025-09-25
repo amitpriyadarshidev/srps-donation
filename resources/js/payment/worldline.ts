@@ -2,13 +2,13 @@ import { loadScript, type PaymentInitResult } from './base';
 
 export type WorldlinePayload = {
   form_data: Record<string, any>;
-  mer_array: Record<string, any>;
+  gateway_configs: Record<string, any>;
   environment: 'test' | 'live';
   returnUrl: string;
 };
 
 function configFromPayload(payload: WorldlinePayload) {
-  const mer = payload.mer_array || {};
+  const mer = payload.gateway_configs || {};
   const fd = payload.form_data || {};
   return {
     tarCall: false,

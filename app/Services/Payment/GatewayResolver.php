@@ -16,7 +16,12 @@ class GatewayResolver
             return 'worldline';
         }
 
-        // Add more detections here for other gateways (easebuzz, cashfree, payu, razorpay, etc.)
+        // Easebuzz typically returns fields like 'txnid', 'easepayid', 'status', 'hash'
+        if ($request->has('txnid') && $request->has('hash')) {
+            return 'easebuzz';
+        }
+
+        // Add more detections here for other gateways (cashfree, payu, razorpay, etc.)
 
         return null;
     }

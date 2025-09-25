@@ -38,9 +38,12 @@ class PaymentCallbackService
 
     protected function getGatewayService(string $code)
     {
-        // For now only worldline; extend with other gateways
+        $env = app()->environment('production') ? 'live' : 'test';
         if ($code === 'worldline') {
-            return new \App\Services\PaymentGateways\WorldlineGateway(app()->environment('production') ? 'live' : 'test');
+            return new \App\Services\PaymentGateways\WorldlineGateway($env);
+        }
+        if ($code === 'easebuzz') {
+            return new \App\Services\PaymentGateways\EasebuzzGateway($env);
         }
         return null;
     }

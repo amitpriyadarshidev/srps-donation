@@ -32,6 +32,8 @@ class PaymentGatewaySeeder extends Seeder
             ['key' => 'salt', 'type' => 'text', 'value' => '6221663217KCONYJ', 'is_sensitive' => true],
             ['key' => 'typeOfPayment', 'type' => 'text', 'value' => 'TEST'],
             ['key' => 'currency', 'type' => 'text', 'value' => 'INR'],
+            ['key' => 'log_enabled', 'type' => 'boolean'],
+            ['key' => 'customerProcessingFee', 'type' => 'boolean', 'value' => true],
             ['key' => 'primaryColor', 'type' => 'text', 'value' => 'red'],
             ['key' => 'secondaryColor', 'type' => 'text', 'value' => 'white'],
             ['key' => 'buttonColor1', 'type' => 'text', 'value' => 'red'],
@@ -64,6 +66,12 @@ class PaymentGatewaySeeder extends Seeder
         ];
 
         foreach ($worldlineBase as $config) {
+            $testValue = $config['value'] ?? env('WORLDLINE_TEST_' . strtoupper($config['key']));
+            $liveValue = $config['value'] ?? env('WORLDLINE_LIVE_' . strtoupper($config['key']));
+            if ($config['key'] === 'log_enabled') {
+                $testValue = '1';
+                $liveValue = '0';
+            }
             PaymentGatewayConfig::updateOrCreate(
                 [
                     'payment_gateway_id' => $worldline->id,
@@ -73,7 +81,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('WORLDLINE_TEST_' . strtoupper($config['key'])),
+                    'value' => $testValue,
                     'is_active' => true,
                 ]
             );
@@ -87,7 +95,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('WORLDLINE_LIVE_' . strtoupper($config['key'])),
+                    'value' => $liveValue,
                     'is_active' => true,
                 ]
             );
@@ -111,9 +119,30 @@ class PaymentGatewaySeeder extends Seeder
             ['key' => 'salt', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'sub_merchant_id', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'currency', 'type' => 'text', 'value' => 'INR'],
+            ['key' => 'log_enabled', 'type' => 'boolean'],
+            ['key' => 'customerProcessingFee', 'type' => 'boolean', 'value' => true],
         ];
 
         foreach ($easebuzzBase as $config) {
+            // Default to provided value or empty string (no .env usage for Easebuzz)
+            $testValue = $config['value'] ?? '';
+            $liveValue = $config['value'] ?? '';
+
+            // Hardcode credentials per environment
+            if ($config['key'] === 'merchant_key') {
+                // Test / Prod keys
+                $testValue = 'QYBI9C4KL';
+                $liveValue = 'O562G7KRPZ';
+            }
+            if ($config['key'] === 'salt') {
+                // Test / Prod salts
+                $testValue = 'OS6YQJR5W';
+                $liveValue = '5ALURBFMLF';
+            }
+            if ($config['key'] === 'log_enabled') {
+                $testValue = '1';
+                $liveValue = '0';
+            }
             PaymentGatewayConfig::updateOrCreate(
                 [
                     'payment_gateway_id' => $easebuzz->id,
@@ -123,7 +152,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('EASEBUZZ_TEST_' . strtoupper($config['key']), ''),
+                    'value' => $testValue,
                     'is_active' => true,
                 ]
             );
@@ -137,7 +166,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('EASEBUZZ_LIVE_' . strtoupper($config['key']), ''),
+                    'value' => $liveValue,
                     'is_active' => true,
                 ]
             );
@@ -160,9 +189,17 @@ class PaymentGatewaySeeder extends Seeder
             ['key' => 'app_id', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'secret_key', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'currency', 'type' => 'text', 'value' => 'INR'],
+            ['key' => 'log_enabled', 'type' => 'boolean'],
+            ['key' => 'customerProcessingFee', 'type' => 'boolean', 'value' => true],
         ];
 
         foreach ($cashfreeBase as $config) {
+            $testValue = $config['value'] ?? env('CASHFREE_TEST_' . strtoupper($config['key']), '');
+            $liveValue = $config['value'] ?? env('CASHFREE_LIVE_' . strtoupper($config['key']), '');
+            if ($config['key'] === 'log_enabled') {
+                $testValue = '1';
+                $liveValue = '0';
+            }
             PaymentGatewayConfig::updateOrCreate(
                 [
                     'payment_gateway_id' => $cashfree->id,
@@ -172,7 +209,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('CASHFREE_TEST_' . strtoupper($config['key']), ''),
+                    'value' => $testValue,
                     'is_active' => true,
                 ]
             );
@@ -186,7 +223,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('CASHFREE_LIVE_' . strtoupper($config['key']), ''),
+                    'value' => $liveValue,
                     'is_active' => true,
                 ]
             );
@@ -210,9 +247,17 @@ class PaymentGatewaySeeder extends Seeder
             ['key' => 'merchant_salt', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'auth_header', 'type' => 'text', 'is_sensitive' => true],
             ['key' => 'currency', 'type' => 'text', 'value' => 'INR'],
+            ['key' => 'log_enabled', 'type' => 'boolean'],
+            ['key' => 'customerProcessingFee', 'type' => 'boolean', 'value' => true],
         ];
 
         foreach ($payuBase as $config) {
+            $testValue = $config['value'] ?? env('PAYU_TEST_' . strtoupper($config['key']), '');
+            $liveValue = $config['value'] ?? env('PAYU_LIVE_' . strtoupper($config['key']), '');
+            if ($config['key'] === 'log_enabled') {
+                $testValue = '1';
+                $liveValue = '0';
+            }
             PaymentGatewayConfig::updateOrCreate(
                 [
                     'payment_gateway_id' => $payu->id,
@@ -222,7 +267,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('PAYU_TEST_' . strtoupper($config['key']), ''),
+                    'value' => $testValue,
                     'is_active' => true,
                 ]
             );
@@ -236,7 +281,7 @@ class PaymentGatewaySeeder extends Seeder
                 [
                     'type' => $config['type'],
                     'is_sensitive' => $config['is_sensitive'] ?? false,
-                    'value' => $config['value'] ?? env('PAYU_LIVE_' . strtoupper($config['key']), ''),
+                    'value' => $liveValue,
                     'is_active' => true,
                 ]
             );

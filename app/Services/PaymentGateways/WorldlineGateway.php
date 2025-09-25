@@ -4,12 +4,14 @@ namespace App\Services\PaymentGateways;
 
 use App\Models\PaymentGateway;
 use App\Models\PaymentGatewayConfig;
+use Illuminate\Support\Facades\Log;
 
 class WorldlineGateway implements PaymentGatewayInterface
 {
     protected string $environment;
     protected PaymentGateway $gateway;
     protected array $configs; // keyed by key => value
+    protected bool $logEnabled = false;
 
     public function __construct(string $environment = 'test')
     {
@@ -24,6 +26,8 @@ class WorldlineGateway implements PaymentGatewayInterface
         foreach ($configs as $cfg) {
             $this->configs[$cfg->key] = $cfg->value;
         }
+
+        $this->logEnabled = ($this->configs['log_enabled'] ?? '0') == '1';
 
         $this->validateConfiguration();
     }
@@ -40,17 +44,17 @@ class WorldlineGateway implements PaymentGatewayInterface
         }
     }
 
-    protected function cfg(string $key, $default = null)
+    protected function config(string $key, $default = null)
     {
         return $this->configs[$key] ?? $default;
     }
 
     public function initializePayment(array $data): array
     {
-        $merchantCode = $this->cfg('merchantCode');
+        $merchantCode = $this->config('merchantCode');
         $amount = $data['amount'];
 
-        if ($this->cfg('typeOfPayment') === 'TEST') {
+        if ($this->config('typeOfPayment') === 'TEST') {
             $amount = 1; // follow test mode convention
         }
 
@@ -60,20 +64,29 @@ class WorldlineGateway implements PaymentGatewayInterface
         $consumerId = 'c' . random_int(1, 1000000);
 
         // Default datastring: merchantId|txnId|amount||consumerId|mobile|email||||||||||salt
-        $datastring = $merchantCode . '|' . $data['transaction_id'] . '|' . $amount . '|' . '|' . $consumerId . '|' . $mobileNumber . '|' . ($data['email'] ?? '') . '||||||||||' . $this->cfg('salt');
+    $datastring = $merchantCode . '|' . $data['transaction_id'] . '|' . $amount . '|' . '|' . $consumerId . '|' . $mobileNumber . '|' . ($data['email'] ?? '') . '||||||||||' . $this->config('salt');
         $hashVal = hash('sha512', $datastring);
 
         $merArray = $this->configs; // expose for UI config
 
+        if ($this->logEnabled) {
+            Log::info('Worldline initializePayment', [
+                'env' => $this->environment,
+                'merchantCode' => $merchantCode,
+                'txnId' => $data['transaction_id'] ?? null,
+                'amount' => $amount,
+            ]);
+        }
+
         return [
             'success' => true,
-            'mer_array' => $merArray,
+            'gateway_configs' => $merArray,
             'data' => [
                 'marchantId' => $merchantCode,
                 'txnId' => $data['transaction_id'],
                 'amount' => $amount,
-                'currencycode' => $this->cfg('currency', 'INR'),
-                'schemecode' => $this->cfg('merchantSchemeCode'),
+                'currencycode' => $this->config('currency', 'INR'),
+                'schemecode' => $this->config('merchantSchemeCode'),
                 'consumerId' => $consumerId,
                 'mobileNumber' => $mobileNumber,
                 'email' => $data['email'] ?? '',
@@ -106,6 +119,14 @@ class WorldlineGateway implements PaymentGatewayInterface
         $txnToken = $parts[5] ?? null;
         $amount = isset($parts[6]) ? (float) $parts[6] : null;
         $success = $statusCode === '0300';
+        if ($this->logEnabled) {
+            Log::info('Worldline handleCallback', [
+                'env' => $this->environment,
+                'statusCode' => $statusCode,
+                'txnToken' => $txnToken,
+                'amount' => $amount,
+            ]);
+        }
         return [
             'success' => $success,
             'status' => $success ? 'completed' : 'failed',
@@ -122,11 +143,11 @@ class WorldlineGateway implements PaymentGatewayInterface
             $date = $transactionDate ?: now()->format('d-m-Y');
             $payload = [
                 'merchant' => [
-                    'identifier' => $this->cfg('merchantCode'),
+                    'identifier' => $this->config('merchantCode'),
                 ],
                 'transaction' => [
                     'deviceIdentifier' => 'S',
-                    'currency' => $this->cfg('currency', 'INR'),
+                    'currency' => $this->config('currency', 'INR'),
                     'identifier' => $transactionId,
                     'dateTime' => $date,
                     'requestType' => 'O',
@@ -146,6 +167,12 @@ class WorldlineGateway implements PaymentGatewayInterface
             if ($res === false) {
                 $err = curl_error($ch);
                 curl_close($ch);
+                if ($this->logEnabled) {
+                    Log::error('Worldline verifyPayment curl error', [
+                        'env' => $this->environment,
+                        'error' => $err,
+                    ]);
+                }
                 return ['success' => false, 'message' => $err];
             }
             curl_close($ch);
@@ -154,6 +181,13 @@ class WorldlineGateway implements PaymentGatewayInterface
             $txn = $data['paymentMethod']['paymentTransaction'] ?? [];
             $statusCode = $txn['statusCode'] ?? '';
             $success = $statusCode === '0300';
+            if ($this->logEnabled) {
+                Log::info('Worldline verifyPayment result', [
+                    'env' => $this->environment,
+                    'statusCode' => $statusCode,
+                    'identifier' => $txn['identifier'] ?? null,
+                ]);
+            }
             return [
                 'success' => $success,
                 'status' => $success ? 'completed' : ($txn['statusMessage'] ?? 'failed'),
@@ -162,6 +196,12 @@ class WorldlineGateway implements PaymentGatewayInterface
                 'raw' => $data,
             ];
         } catch (\Throwable $e) {
+            if ($this->logEnabled) {
+                Log::error('Worldline verifyPayment exception', [
+                    'env' => $this->environment,
+                    'message' => $e->getMessage(),
+                ]);
+            }
             return [
                 'success' => false,
                 'message' => $e->getMessage(),

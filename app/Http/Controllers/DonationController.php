@@ -318,7 +318,6 @@ class DonationController extends Controller
     {
         $request->validate([
             'gateway' => 'required|string|exists:payment_gateways,code',
-            'retry_transaction_id' => 'sometimes|uuid',
         ]);
 
         $donation = Donation::with(['currency', 'purpose'])->findOrFail($donationId);
@@ -335,82 +334,7 @@ class DonationController extends Controller
             ], 422);
         }
 
-        // If retrying an existing transaction, verify and reuse same gateway reference
-        $retryTxnUuid = $request->input('retry_transaction_id');
-        if ($retryTxnUuid) {
-            $existing = Transaction::where('id', $retryTxnUuid)
-                ->where('donation_id', $donation->id)
-                ->first();
-
-            if ($existing && optional($existing->gateway)->id === $gateway->id) {
-                $ref = $existing->gateway_transaction_id ?: $existing->gateway_token;
-                if ($ref) {
-                    $verify = $service->verifyPayment((string)$ref, optional($existing->created_at)->format('d-m-Y'));
-
-                    if (!empty($verify['success'])) {
-                        $existing->status = 'completed';
-                        if (!empty($verify['token_identifier'])) {
-                            $existing->gateway_token = $verify['token_identifier'];
-                        }
-                        $existing->gateway_response = array_merge((array)$existing->gateway_response ?? [], ['verify' => $verify]);
-                        $existing->save();
-
-                        (new TransactionSessionService())->updateStatus($existing->id, $existing->status);
-
-                        return response()->json([
-                            'ok' => true,
-                            'alreadyCompleted' => true,
-                            'redirect' => route('donation.confirmation', $donation->id),
-                        ]);
-                    }
-
-                    // Not completed: re-initiate using same gateway reference
-                    $response = $service->initializePayment([
-                        'amount' => (float) $donation->amount * 1.05,
-                        'currency' => $donation->currency->code ?? 'INR',
-                        'transaction_id' => $ref,
-                        'donor_id' => $donation->id,
-                        'name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
-                        'email' => $donation->email,
-                        'phone' => $donation->phone,
-                        'phone_country_code' => $donation->phone_country_code,
-                    ]);
-
-                    if (!($response['success'] ?? false)) {
-                        return response()->json([
-                            'ok' => false,
-                            'message' => 'Failed to initialize payment',
-                        ], 422);
-                    }
-
-                    // Mark as pending again and refresh session snapshot
-                    $existing->status = 'pending';
-                    $existing->save();
-                    (new TransactionSessionService())->store($existing->id, [
-                        'donation_id' => $donation->id,
-                        'amount' => (float) $donation->amount * 1.05,
-                        'currency' => $donation->currency->symbol ?? '',
-                        'donor_name' => trim(($donation->first_name ?? '') . ' ' . ($donation->last_name ?? '')),
-                        'email' => $donation->email,
-                        'phone' => ($donation->phone_country_code ?? '') . ($donation->phone ?? ''),
-                        'status' => 'pending',
-                        'gateway' => $gateway->code,
-                    ]);
-
-                    return response()->json([
-                        'ok' => true,
-                        'gateway' => $gateway->code,
-                        'payload' => [
-                            'form_data' => $response['data'] ?? [],
-                            'mer_array' => $response['mer_array'] ?? [],
-                            'environment' => $env,
-                            'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
-                        ],
-                    ]);
-                }
-            }
-            // If mismatch or missing ref, fall through to create a new transaction as before
-        }
+        // Always initiate a fresh transaction; do not reuse or retry a previous gateway reference
 
         // Build a new transaction reference with gateway-based prefix
         $prefix = strtoupper(substr($gateway->code, 0, 3));
@@ -430,7 +354,8 @@ class DonationController extends Controller
         if (!($response['success'] ?? false)) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Failed to initialize payment',
+                'message' => $response['message'] ?? 'Failed to initialize payment',
+                'data' => $response['raw'] ?? null,
             ], 422);
         }
 
@@ -456,15 +381,32 @@ class DonationController extends Controller
             'gateway' => $gateway->code,
         ]);
 
+        // Build payload depending on gateway response shape
+        $payload = null;
+        if (!empty($response['ezcheckout'])) {
+            // Prefer iframe checkout when available
+            $payload = [
+                'ezcheckout' => $response['ezcheckout'],
+                'environment' => $env,
+                'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
+            ];
+        } elseif (!empty($response['url'])) {
+            $payload = ['url' => $response['url']];
+        } elseif (!empty($response['form'])) {
+            $payload = ['form' => $response['form']];
+        } else {
+            $payload = [
+                'form_data' => $response['data'] ?? [],
+                'gateway_configs' => $response['gateway_configs'] ?? [],
+                'environment' => $env,
+                'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
+            ];
+        }
+
         return response()->json([
             'ok' => true,
             'gateway' => $gateway->code,
-            'payload' => [
-                'form_data' => $response['data'] ?? [],
-                'mer_array' => $response['mer_array'] ?? [],
-                'environment' => $env,
-                'returnUrl' => route('payment.callback', ['donation_id' => $donation->id]),
-            ],
+            'payload' => $payload,
         ]);
     }
 
@@ -479,7 +421,7 @@ class DonationController extends Controller
         ]);
 
         $service = new \App\Services\Payment\PaymentCallbackService(new \App\Services\Payment\GatewayResolver());
-        $result = $service->handle($request);
+    $result = $service->handle($request);
 
         $donationId = $request->query('donation_id') ?? $request->input('donation_id');
 
@@ -487,7 +429,8 @@ class DonationController extends Controller
         if ($donationId) {
             $txn = Transaction::where('donation_id', $donationId)->latest('created_at')->first();
             if ($txn) {
-                $txn->status = ($result['success'] ?? false) ? 'completed' : ($result['status'] ?? 'failed');
+                $computed = ($result['success'] ?? false) ? 'completed' : ($result['status'] ?? 'failed');
+                $txn->status = $this->normalizeTransactionStatus($computed, $result['raw'] ?? $request->all());
                 // Worldline returns token; store it separately as gateway_token
                 if (!empty($result['transaction_id'])) {
                     $txn->gateway_token = $result['transaction_id'];
@@ -516,6 +459,32 @@ class DonationController extends Controller
         }
 
         return redirect()->route('home')->with('error', $result['message'] ?? 'Payment failed or cancelled.');
+    }
+
+    /**
+     * Normalize inbound statuses from gateways to our enum: pending|completed|failed|refunded|aborted|cancelled
+     */
+    private function normalizeTransactionStatus(string $status, array $raw = []): string
+    {
+        $s = strtolower($status);
+        // Some gateways send granular reasons in raw payload
+        $rawStatus = strtolower((string)($raw['status'] ?? ''));
+
+        // Prefer explicit cancelled when gateway indicates so
+        if (in_array($s, ['cancelled', 'canceled'], true) || in_array($rawStatus, ['cancelled', 'canceled', 'usercancelled', 'user_cancelled'], true)) {
+            return 'cancelled';
+        }
+        if (in_array($s, ['aborted'], true) || $rawStatus === 'aborted') {
+            return 'aborted';
+        }
+        if (in_array($s, ['refunded'], true) || $rawStatus === 'refunded') {
+            return 'refunded';
+        }
+        if ($s === 'completed' || $s === 'success' || $rawStatus === 'success') {
+            return 'completed';
+        }
+        // Any other cases, including 'error', 'failure', 'failed', 'unknown' → failed
+        return 'failed';
     }
 
     /**
