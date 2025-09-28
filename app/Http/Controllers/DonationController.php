@@ -421,7 +421,14 @@ class DonationController extends Controller
         ]);
 
         $service = new \App\Services\Payment\PaymentCallbackService(new \App\Services\Payment\GatewayResolver());
-    $result = $service->handle($request);
+        $result = $service->handle($request);
+
+        // Temporary debug - remove after confirmation
+        \Log::info('PaymentCallback debug', [
+            'result_success' => $result['success'] ?? 'missing',
+            'result_status' => $result['status'] ?? 'missing', 
+            'result_gateway' => $result['gateway'] ?? 'missing',
+        ]);
 
         $donationId = $request->query('donation_id') ?? $request->input('donation_id');
 
@@ -445,6 +452,7 @@ class DonationController extends Controller
 
         // TODO: lookup donation/transaction by identifiers and persist status
         if ($result['success'] ?? false) {
+            \Log::info('Redirecting to confirmation - success=true');
             if ($donationId) {
                 return redirect()->route('donation.confirmation', $donationId)
                     ->with('success', 'Payment completed successfully.');
@@ -453,6 +461,7 @@ class DonationController extends Controller
         }
 
         // On cancel/failure, send user back to payment-selection
+        \Log::info('Redirecting to payment-selection - success=false');
         if ($donationId) {
             return redirect()->route('donation.payment-selection', $donationId)
                 ->with('error', $result['message'] ?? 'Payment cancelled or failed. Please try again.');

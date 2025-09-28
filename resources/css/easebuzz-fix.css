@@ -1,0 +1,14 @@
+/* Fix for Easebuzz checkout icon loading errors */
+[src*="function(e)"] {
+    display: none !important;
+}
+
+/* Hide broken Easebuzz checkout images */
+img[src*="function(e)"] {
+    display: none !important;
+}
+
+/* Fallback for malformed Easebuzz URLs */
+.easebuzz-checkout img[src*="concat"] {
+    display: none !important;
+}

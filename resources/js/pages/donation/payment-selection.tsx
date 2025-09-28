@@ -64,6 +64,40 @@ const PaymentSelection: React.FC = () => {
     };
   }, [donation]);
 
+  // Reset stuck UI if Easebuzz iframe closes/errors/times out.
+  useEffect(() => {
+    const reset = () => {
+      setProcessing(false);
+      // Clear the checkout active flag if it exists
+      (window as any).easebuzzCheckoutActive = false;
+    };
+    
+    const onClosed = () => {
+      console.log('Easebuzz checkout closed by user');
+      reset();
+    };
+    
+    const onError = (event: any) => {
+      console.log('Easebuzz checkout error:', event.detail);
+      reset();
+    };
+    
+    const onTimeout = () => {
+      console.log('Easebuzz checkout timed out');
+      reset();
+    };
+    
+    window.addEventListener('easebuzz:closed', onClosed);
+    window.addEventListener('easebuzz:error', onError);
+    window.addEventListener('easebuzz:timeout', onTimeout);
+    
+    return () => {
+      window.removeEventListener('easebuzz:closed', onClosed);
+      window.removeEventListener('easebuzz:error', onError);
+      window.removeEventListener('easebuzz:timeout', onTimeout);
+    };
+  }, []);
+
   // If last transaction failed and that gateway is available, prefer it by default when options load
   useEffect(() => {
     if (!gateways || gateways.length === 0) return;
@@ -85,7 +119,28 @@ const PaymentSelection: React.FC = () => {
   return (
     <DonationLayout title="Payment">
       <Head title="Payment Selection" />
-      <div className="max-w-5xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+      
+      {/* Page-wide processing overlay */}
+      {processing && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[999999]"
+          style={{ backdropFilter: 'blur(2px)' }}
+        >
+          <div className="bg-white rounded-lg p-6 shadow-xl text-center max-w-sm mx-4">
+            <div className="mb-4">
+              <svg className="animate-spin -ml-1 mr-3 h-8 w-8 text-blue-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Payment</h3>
+            <p className="text-sm text-gray-600">Please wait while we prepare your secure checkout...</p>
+            <p className="text-xs text-gray-500 mt-2">Do not close this window or refresh the page</p>
+          </div>
+        </div>
+      )}
+      
+      <div className={`max-w-5xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 ${processing ? 'pointer-events-none opacity-75' : ''}`}>
         {flash.success && (
           <div className="mb-6 rounded-md border border-green-200 bg-green-50 dark:bg-green-900/20 dark:border-green-700/40 px-4 py-3 text-green-800 dark:text-green-300 text-sm font-medium">
             {flash.success}
@@ -266,7 +321,18 @@ const PaymentSelection: React.FC = () => {
               e.preventDefault();
               if (!donation || !selectedGateway) return;
               try {
+                // Clear any stuck checkout state before starting
+                (window as any).easebuzzCheckoutActive = false;
+                
                 setProcessing(true);
+                
+                // Check if checkout is already active (prevents double-click issues)
+                if ((window as any).easebuzzCheckoutActive) {
+                  console.log('Checkout already active, ignoring submit');
+                  setProcessing(false);
+                  return;
+                }
+                
                 // Try to read XSRF-TOKEN cookie (set by Laravel when using VerifyCsrfToken)
                 const xsrf = document.cookie.split('; ').find((row) => row.startsWith('XSRF-TOKEN='))?.split('=')[1];
                 const csrfMeta = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -291,18 +357,30 @@ const PaymentSelection: React.FC = () => {
                   return;
                 }
                 if (data.ok && data.gateway) {
+                  // Store the payload URL for fallback
                   const result = await initGateway(data.gateway, data.payload);
                   if (!result.ok) {
                     setProcessing(false);
+                    (window as any).easebuzzCheckoutActive = false;
                     alert(result.message || 'Payment initialization failed.');
+                  } else {
+                    // For iframe flows, we rely on checkout to handle redirect/callback.
+                    // For simple redirects, navigation occurs immediately; for safety, we keep button disabled only briefly.
+                    setTimeout(() => {
+                      if (!(window as any).easebuzzCheckoutActive) {
+                        setProcessing(false);
+                      }
+                    }, 3000);
                   }
                 } else {
                   setProcessing(false);
+                  (window as any).easebuzzCheckoutActive = false;
                   alert(data.message || 'Unable to begin payment.');
                 }
               } catch (err) {
                 console.error(err);
                 setProcessing(false);
+                (window as any).easebuzzCheckoutActive = false;
                 alert('Error initiating payment.');
               }
             }}
@@ -390,6 +468,7 @@ const PaymentSelection: React.FC = () => {
             No payment gateways are currently available.
           </div>
         )}
+        
         <div className="mt-8 text-xs text-gray-500 dark:text-neutral-500">
           <p className="dark:text-neutral-400">You will receive a confirmation email after successful payment.</p>
           <p className="mt-2 dark:text-neutral-400">Need help? <Link href="/support" className="text-blue-600 dark:text-blue-400 hover:underline">Contact support</Link>.</p>
